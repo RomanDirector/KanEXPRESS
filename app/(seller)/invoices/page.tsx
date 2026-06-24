@@ -76,19 +76,12 @@ export default function InvoicesPage() {
     fetchOrders()
   }, [])
 
-  const handleDownloadAll = () => {
-    orders.forEach((order) => generatePDF(order))
-  }
-
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-red-600">KanEXpress</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Invoices</p>
-        </div>
+        <h2 className="text-xl font-bold">Invoices</h2>
         <button
-          onClick={handleDownloadAll}
+          onClick={() => orders.forEach((o) => generatePDF(o))}
           className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           ⬇️ Download All
@@ -139,9 +132,7 @@ export default function InvoicesPage() {
             </table>
           </div>
         )}
-        <p className="text-sm text-gray-400 mt-3">
-          Total invoices: {orders.length}
-        </p>
+        <p className="text-sm text-gray-400 mt-3">Total invoices: {orders.length}</p>
       </main>
     </div>
   )

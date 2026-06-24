@@ -28,7 +28,6 @@ export default function ArchivePage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('')
 
   useEffect(() => {
@@ -52,24 +51,22 @@ export default function ArchivePage() {
   }, [])
 
   const filtered = orders.filter((o) => {
-    const matchStatus = filterStatus === 'all' || o.status === filterStatus
     const matchDate = !filterDate || o.created_at.startsWith(filterDate)
     const matchSearch =
       o.order_number.toLowerCase().includes(search.toLowerCase()) ||
       o.client_phone.includes(search) ||
       o.client_address.toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchDate && matchSearch
+    return matchDate && matchSearch
   })
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4">
-        <h1 className="text-2xl font-bold text-red-600">KanEXpress</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Archive</p>
+      <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
+        <h2 className="text-xl font-bold">Archive</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Delivered orders</p>
       </header>
 
       <main className="px-6 py-6 max-w-7xl mx-auto">
-        {/* Фильтры */}
         <div className="flex flex-wrap gap-3 mb-4">
           <input
             type="text"

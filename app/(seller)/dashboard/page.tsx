@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 
@@ -68,16 +69,12 @@ export default function SellerDashboard() {
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-red-600">KanEXpress</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Дашборд продавца</p>
-        </div>
-        <button
-          onClick={() => alert('Скачивание накладных — следующий шаг!')}
-          className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          ⬇️ Скачать все накладные
-        </button>
+        <h2 className="text-xl font-bold">Dashboard</h2>
+        <Link href="/invoices">
+          <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            ⬇️ Скачать все накладные
+          </button>
+        </Link>
       </header>
 
       <main className="px-6 py-6 max-w-7xl mx-auto">
@@ -158,12 +155,11 @@ export default function SellerDashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => alert(`Накладная для ${order.order_number}`)}
-                        className="text-red-600 hover:underline text-xs font-medium"
-                      >
-                        ⬇️ PDF
-                      </button>
+                      <Link href="/invoices">
+                        <button className="text-red-600 hover:underline text-xs font-medium">
+                          ⬇️ PDF
+                        </button>
+                      </Link>
                     </td>
                   </tr>
                 ))}
