@@ -15,20 +15,18 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
   const pathname = usePathname()
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-secondary">
       {/* Sidebar */}
-      <aside className="w-60 bg-white border-r border-gray-200 flex flex-col py-6 px-4 fixed h-full shadow-sm">
-        
-        {/* Лого */}
+      <aside className="w-60 bg-card border-r border-border flex flex-col py-6 px-4 fixed h-full shadow-sm">
+
         <div className="mb-8 px-2">
           <span className="text-2xl font-black tracking-tight">
-            <span className="text-red-600">Kan</span>
-            <span className="text-gray-900">EXPRESS</span>
+            <span className="text-primary">Kan</span>
+            <span className="text-foreground">EXPRESS</span>
           </span>
-          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wider">Seller Panel</p>
+          <p className="text-xs text-muted-foreground mt-1 font-medium uppercase tracking-wider">Seller Panel</p>
         </div>
 
-        {/* Навигация */}
         <nav className="flex flex-col gap-1">
           {navItems.map((item) => {
             const Icon = item.icon
@@ -39,8 +37,8 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-red-600 text-white shadow-md shadow-red-200'
-                    : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                 }`}
               >
                 <Icon size={18} />
@@ -50,17 +48,15 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
           })}
         </nav>
 
-        {/* Низ sidebar */}
         <div className="mt-auto px-2">
-          <div className="bg-red-50 rounded-xl p-3">
-            <p className="text-xs font-semibold text-red-600">KanEXpress</p>
-            <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>
+          <div className="bg-primary/10 rounded-xl p-3">
+            <p className="text-xs font-semibold text-primary">KanExpress</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Logistics for Kaspi.kz</p>
           </div>
         </div>
       </aside>
 
-      {/* Контент */}
-      <main className="ml-60 flex-1 min-h-screen bg-gray-50">
+      <main className="ml-60 flex-1 min-h-screen">
         {children}
       </main>
     </div>

@@ -1,8 +1,21 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useEffect, useState, useMemo } from 'react'
+import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Download, X } from 'lucide-react'
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 
@@ -15,10 +28,10 @@ interface Order {
   created_at: string
 }
 
-const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string }> = {
-  pending:    { label: 'Не отгружено', color: 'bg-yellow-100 text-yellow-700 border border-yellow-200' },
-  in_transit: { label: 'В пути',       color: 'bg-blue-100 text-blue-700 border border-blue-200' },
-  delivered:  { label: 'Доставлено',   color: 'bg-green-100 text-green-700 border border-green-200' },
+const STATUS_CONFIG: Record<OrderStatus, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
+  pending:    { label: 'Не отгружено', variant: 'outline' },
+  in_transit: { label: 'В пути',       variant: 'secondary' },
+  delivered:  { label: 'Доставлено',   variant: 'default' },
 }
 
 export default function SellerDashboard() {
@@ -27,6 +40,8 @@ export default function SellerDashboard() {
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all')
   const [filterDate, setFilterDate] = useState('')
   const [search, setSearch] = useState('')
+
+  const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -45,7 +60,7 @@ export default function SellerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchOrders)
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [supabase])
 
   const filtered = orders.filter((o) => {
     const matchStatus = filterStatus === 'all' || o.status === filterStatus
@@ -57,110 +72,123 @@ export default function SellerDashboard() {
     return matchStatus && matchDate && matchSearch
   })
 
+  const hasFilters = filterStatus !== 'all' || filterDate || search
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
-        <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
-        <Link href="/invoices">
-          <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-sm shadow-red-200">
-            ⬇️ Скачать все накладные
-          </button>
-        </Link>
+    <div className="min-h-screen bg-background">
+      <header className="bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+        <h2 className="text-xl font-bold text-foreground">Dashboard</h2>
+        <Button asChild>
+          <Link href="/invoices">
+            <Download className="mr-2 h-4 w-4" />
+            Скачать накладные
+          </Link>
+        </Button>
       </header>
 
-      <main className="px-6 py-6 max-w-7xl mx-auto">
-        {/* Карточки статистики */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+      <main className="px-6 py-6 max-w-7xl mx-auto space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {(Object.entries(STATUS_CONFIG) as [OrderStatus, typeof STATUS_CONFIG[OrderStatus]][]).map(([key, cfg]) => (
-            <div key={key} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-              <p className="text-sm text-gray-500 font-medium">{cfg.label}</p>
-              <p className="text-4xl font-black mt-2 text-gray-900">
-                {orders.filter(o => o.status === key).length}
-              </p>
-            </div>
+            <Card key={key}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {cfg.label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-4xl font-black text-foreground">
+                  {orders.filter(o => o.status === key).length}
+                </p>
+              </CardContent>
+            </Card>
           ))}
         </div>
 
-        {/* Фильтры */}
-        <div className="flex flex-wrap gap-3 mb-4">
-          <input
-            type="text"
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
             placeholder="Поиск по номеру, телефону, адресу..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white flex-1 min-w-[200px] shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="flex-1 min-w-[220px]"
           />
           <select
             value={filterStatus}
             onChange={e => setFilterStatus(e.target.value as OrderStatus | 'all')}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="all">Все статусы</option>
             <option value="pending">Не отгружено</option>
             <option value="in_transit">В пути</option>
             <option value="delivered">Доставлено</option>
           </select>
-          <input
+          <Input
             type="date"
             value={filterDate}
             onChange={e => setFilterDate(e.target.value)}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            className="w-auto"
           />
-          {(filterStatus !== 'all' || filterDate || search) && (
-            <button
+          {hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => { setFilterStatus('all'); setFilterDate(''); setSearch('') }}
-              className="text-sm text-red-600 hover:underline font-medium"
             >
+              <X className="mr-1 h-4 w-4" />
               Сбросить
-            </button>
+            </Button>
           )}
         </div>
 
-        {/* Таблица */}
         {loading ? (
-          <div className="text-center py-20 text-gray-400">Загружаем заказы...</div>
+          <div className="text-center py-20 text-muted-foreground">Загружаем заказы...</div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20 text-gray-400">Заказов не найдено</div>
+          <div className="text-center py-20 text-muted-foreground">Заказов не найдено</div>
         ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-left border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">№ Заказа</th>
-                  <th className="px-4 py-3 font-semibold">Телефон</th>
-                  <th className="px-4 py-3 font-semibold">Адрес</th>
-                  <th className="px-4 py-3 font-semibold">Дата</th>
-                  <th className="px-4 py-3 font-semibold">Статус</th>
-                  <th className="px-4 py-3 font-semibold">Накладная</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>№ Заказа</TableHead>
+                  <TableHead>Телефон</TableHead>
+                  <TableHead>Адрес</TableHead>
+                  <TableHead>Дата</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead>Накладная</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filtered.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-mono font-bold text-gray-900">{order.order_number}</td>
-                    <td className="px-4 py-3 text-gray-600">{order.client_phone}</td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate">{order.client_address}</td>
-                    <td className="px-4 py-3 text-gray-400">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${STATUS_CONFIG[order.status].color}`}>
+                  <TableRow key={order.id}>
+                    <TableCell className="font-mono font-bold">{order.order_number}</TableCell>
+                    <TableCell className="text-muted-foreground">{order.client_phone}</TableCell>
+                    <TableCell className="text-muted-foreground max-w-[200px] truncate">{order.client_address}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(order.created_at).toLocaleDateString('ru-RU')}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={STATUS_CONFIG[order.status].variant}>
                         {STATUS_CONFIG[order.status].label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Link href="/invoices">
-                        <button className="text-red-600 hover:text-red-700 text-xs font-semibold hover:underline">
-                          ⬇️ PDF
-                        </button>
-                      </Link>
-                    </td>
-                  </tr>
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href="/invoices">
+                          <Download className="mr-1 h-3 w-3" />
+                          PDF
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         )}
+
         {!loading && (
-          <p className="text-sm text-gray-400 mt-3">Показано {filtered.length} из {orders.length} заказов</p>
+          <p className="text-sm text-muted-foreground">
+            Показано {filtered.length} из {orders.length} заказов
+          </p>
         )}
       </main>
     </div>
