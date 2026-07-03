@@ -2,15 +2,20 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { TrendingUp, ShoppingBag, CheckCircle, BarChart3 } from 'lucide-react'
+import { useLang } from '@/lib/i18n'
 
 interface Order {
   id: string
   order_number: string
   status: string
+  price: number
+  courier_name: string | null
   created_at: string
 }
 
 export default function StatsPage() {
+  const { t } = useLang()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState<'week' | 'month' | 'all'>('all')
@@ -46,96 +51,192 @@ export default function StatsPage() {
   })
 
   const total = filtered.length
+  const delivered = filtered.filter(o => o.status === 'delivered').length
   const pending = filtered.filter(o => o.status === 'pending').length
   const inTransit = filtered.filter(o => o.status === 'in_transit').length
-  const delivered = filtered.filter(o => o.status === 'delivered').length
   const deliveryRate = total > 0 ? Math.round((delivered / total) * 100) : 0
+  const totalRevenue = filtered.reduce((sum, o) => sum + (o.price || 0), 0)
+  const avgCheck = total > 0 ? Math.round(totalRevenue / total) : 0
 
-  const byDate: Record<string, number> = {}
+  // Заказы по датам для графика
+  const byDate: Record<string, { orders: number; revenue: number }> = {}
   filtered.forEach(o => {
     const date = new Date(o.created_at).toLocaleDateString('ru-RU')
-    byDate[date] = (byDate[date] || 0) + 1
+    if (!byDate[date]) byDate[date] = { orders: 0, revenue: 0 }
+    byDate[date].orders += 1
+    byDate[date].revenue += o.price || 0
   })
-  const dateEntries = Object.entries(byDate).slice(0, 7)
-  const maxCount = Math.max(...dateEntries.map(([, v]) => v), 1)
+  const dateEntries = Object.entries(byDate).slice(-7)
+  const maxOrders = Math.max(...dateEntries.map(([, v]) => v.orders), 1)
+  const maxRevenue = Math.max(...dateEntries.map(([, v]) => v.revenue), 1)
+
+  // Выручка по курьерам
+  const byCourier: Record<string, number> = {}
+  filtered.forEach(o => {
+    const name = o.courier_name || 'Не назначен'
+    byCourier[name] = (byCourier[name] || 0) + (o.price || 0)
+  })
+  const courierEntries = Object.entries(byCourier).sort((a, b) => b[1] - a[1])
+  const maxCourierRevenue = Math.max(...courierEntries.map(([, v]) => v), 1)
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm">
-        <h2 className="text-xl font-bold text-gray-900">Statistics</h2>
+      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('stats')} & {t('finance')}</h1>
+          <p className="text-sm text-gray-400 mt-0.5">{t('financeSub')}</p>
+        </div>
         <div className="flex gap-2">
           {(['week', 'month', 'all'] as const).map(p => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
                 period === p
                   ? 'bg-red-600 text-white shadow-sm shadow-red-200'
                   : 'border border-gray-200 text-gray-500 hover:bg-gray-100 bg-white'
               }`}
             >
-              {p === 'week' ? 'Week' : p === 'month' ? 'Month' : 'All time'}
+              {p === 'week' ? t('week') : p === 'month' ? t('month') : t('allTime')}
             </button>
           ))}
         </div>
       </header>
 
-      <main className="px-6 py-6 max-w-7xl mx-auto">
+      <main className="px-8 py-6 max-w-7xl mx-auto">
         {loading ? (
-          <div className="text-center py-20 text-gray-400">Loading...</div>
+          <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-                <p className="text-sm text-gray-500 font-medium">Total Orders</p>
-                <p className="text-4xl font-black mt-2 text-gray-900">{total}</p>
+            {/* Финансовые карточки */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-6">
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">{t('totalRevenue')}</p>
+                  <div className="bg-red-50 p-2 rounded-xl">
+                    <TrendingUp size={18} className="text-red-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-gray-900">{totalRevenue.toLocaleString('ru-RU')} ₸</p>
               </div>
-              <div className="bg-white rounded-2xl border border-yellow-200 p-5 shadow-sm">
-                <p className="text-sm text-yellow-600 font-medium">Pending</p>
-                <p className="text-4xl font-black mt-2 text-yellow-600">{pending}</p>
+
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">{t('avgCheck')}</p>
+                  <div className="bg-blue-50 p-2 rounded-xl">
+                    <BarChart3 size={18} className="text-blue-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-blue-600">{avgCheck.toLocaleString('ru-RU')} ₸</p>
               </div>
-              <div className="bg-white rounded-2xl border border-blue-200 p-5 shadow-sm">
-                <p className="text-sm text-blue-600 font-medium">In Transit</p>
-                <p className="text-4xl font-black mt-2 text-blue-600">{inTransit}</p>
+
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">{t('total')} {t('orders')}</p>
+                  <div className="bg-amber-50 p-2 rounded-xl">
+                    <ShoppingBag size={18} className="text-amber-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-amber-600">{total}</p>
               </div>
-              <div className="bg-white rounded-2xl border border-green-200 p-5 shadow-sm">
-                <p className="text-sm text-green-600 font-medium">Delivered</p>
-                <p className="text-4xl font-black mt-2 text-green-600">{delivered}</p>
+
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">{t('delivered')}</p>
+                  <div className="bg-green-50 p-2 rounded-xl">
+                    <CheckCircle size={18} className="text-green-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-green-600">{delivered}</p>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6 shadow-sm">
-              <p className="text-sm text-gray-500 font-medium mb-3">Delivery Rate</p>
-              <div className="flex items-center gap-4">
-                <div className="flex-1 bg-gray-100 rounded-full h-4">
-                  <div
-                    className="bg-red-600 h-4 rounded-full transition-all"
-                    style={{ width: `${deliveryRate}%` }}
-                  />
-                </div>
+            {/* Прогресс доставки */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-bold text-gray-700">{t('deliveryRate')}</p>
                 <span className="text-2xl font-black text-red-600">{deliveryRate}%</span>
               </div>
+              <div className="w-full bg-gray-100 rounded-full h-3">
+                <div
+                  className="bg-gradient-to-r from-red-500 to-red-600 h-3 rounded-full transition-all duration-500"
+                  style={{ width: `${deliveryRate}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-3 text-xs text-gray-400">
+                <span>{t('pending')}: {pending}</span>
+                <span>{t('in_transit')}: {inTransit}</span>
+                <span>{t('delivered')}: {delivered}</span>
+              </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-              <p className="text-sm text-gray-500 font-medium mb-6">Orders by Date</p>
-              {dateEntries.length === 0 ? (
-                <p className="text-gray-400 text-sm">No data</p>
-              ) : (
-                <div className="flex items-end gap-4 h-48">
-                  {dateEntries.map(([date, count]) => (
-                    <div key={date} className="flex flex-col items-center flex-1 gap-1">
-                      <span className="text-xs text-gray-500 font-medium">{count}</span>
-                      <div
-                        className="w-full bg-red-500 rounded-t min-h-[4px]"
-                        style={{ height: `${(count / maxCount) * 160}px` }}
-                      />
-                      <span className="text-xs text-gray-400 text-center">{date}</span>
+            {/* Графики в две колонки */}
+            <div className="grid grid-cols-2 gap-6 mb-6">
+              {/* График заказов по датам */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <p className="text-sm font-bold text-gray-700 mb-6">{t('ordersByDate')}</p>
+                {dateEntries.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-8">{t('notFound')}</p>
+                ) : (
+                  <div className="flex items-end gap-3 h-40">
+                    {dateEntries.map(([date, val]) => (
+                      <div key={date} className="flex flex-col items-center flex-1 gap-1">
+                        <span className="text-xs text-gray-500 font-bold">{val.orders}</span>
+                        <div
+                          className="w-full bg-red-500 rounded-t min-h-[4px] transition-all"
+                          style={{ height: `${(val.orders / maxOrders) * 130}px` }}
+                        />
+                        <span className="text-xs text-gray-400 text-center leading-tight">{date.slice(0, 5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* График выручки по датам */}
+              <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <p className="text-sm font-bold text-gray-700 mb-6">{t('revenueByDate')}</p>
+                {dateEntries.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-8">{t('notFound')}</p>
+                ) : (
+                  <div className="flex items-end gap-3 h-40">
+                    {dateEntries.map(([date, val]) => (
+                      <div key={date} className="flex flex-col items-center flex-1 gap-1">
+                        <span className="text-xs text-gray-500 font-bold">{Math.round(val.revenue / 1000)}K</span>
+                        <div
+                          className="w-full bg-blue-500 rounded-t min-h-[4px] transition-all"
+                          style={{ height: `${(val.revenue / maxRevenue) * 130}px` }}
+                        />
+                        <span className="text-xs text-gray-400 text-center leading-tight">{date.slice(0, 5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Выручка по курьерам */}
+            {courierEntries.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <p className="text-sm font-bold text-gray-700 mb-4">{t('revenue')} по курьерам</p>
+                <div className="flex flex-col gap-3">
+                  {courierEntries.map(([name, rev]) => (
+                    <div key={name}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium text-gray-700">{name}</span>
+                        <span className="font-bold text-gray-900">{rev.toLocaleString('ru-RU')} ₸</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-green-400 to-green-600 h-2 rounded-full transition-all"
+                          style={{ width: `${(rev / maxCourierRevenue) * 100}%` }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
       </main>

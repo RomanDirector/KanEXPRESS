@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@2gis/mapgl": "^1.75.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "jsbarcode": "^3.12.3",
