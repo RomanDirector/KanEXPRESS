@@ -1,10 +1,90 @@
+'use client'
+
 import Link from 'next/link'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Navbar } from '@/components/layout/navbar'
+import { supabase } from '@/lib/supabase'
+import { getPendingRegistration, clearPendingRegistration } from '@/lib/pending-registration'
+import { ensureProfileExists } from '@/lib/ensure-profile'
 
 export default function LoginPage() {
+  const router = useRouter()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (signInError || !data.user) {
+      setLoading(false)
+      setError(signInError?.message ?? 'Не удалось войти')
+      return
+    }
+
+    const userId = data.user.id
+
+    const { data: courier } = await supabase
+      .from('couriers')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (courier) {
+      router.push('/courier-dashboard')
+      return
+    }
+
+    const { data: seller } = await supabase
+      .from('sellers')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (seller) {
+      router.push('/dashboard')
+      return
+    }
+
+    // Профиля нет ни в одной из таблиц — это ожидаемо, если пользователь
+    // подтвердил email не сразу: signUp создал auth-пользователя, но insert
+    // в couriers/sellers тогда не прошёл бы (не было сессии для RLS).
+    // Черновик анкеты лежит в pending_registrations (не в localStorage) —
+    // сработает даже если регистрировались с другого устройства.
+    const pending = await getPendingRegistration(supabase, userId)
+
+    if (!pending) {
+      setLoading(false)
+      setError('Регистрация не завершена, пройдите её заново')
+      return
+    }
+
+    const result = await ensureProfileExists(supabase, userId, pending.data.role, pending.data)
+
+    if (!result.success) {
+      setLoading(false)
+      setError(result.error)
+      return
+    }
+
+    await clearPendingRegistration(supabase, pending.id)
+
+    setLoading(false)
+    router.push(pending.data.role === 'courier' ? '/courier-dashboard' : '/dashboard')
+  }
+
   return (
     <div className="min-h-screen bg-[#f8f8f8]">
       <Navbar />
@@ -21,10 +101,16 @@ export default function LoginPage() {
 
           {/* Карточка формы */}
           <div className="bg-white rounded-2xl shadow-sm p-8 space-y-5">
-            <form className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
                 <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
-                <Input type="email" placeholder="you@example.com" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -34,7 +120,13 @@ export default function LoginPage() {
                     Забыли пароль?
                   </a>
                 </div>
-                <Input type="password" placeholder="••••••••" />
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
               </div>
 
               <label className="flex items-center gap-2.5 cursor-pointer">
@@ -45,8 +137,10 @@ export default function LoginPage() {
                 <span className="text-sm text-gray-400">Запомнить меня</span>
               </label>
 
-              <Button type="submit" className="w-full rounded-full py-6 text-base font-semibold">
-                Войти
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <Button type="submit" disabled={loading} className="w-full rounded-full py-6 text-base font-semibold">
+                {loading ? 'Входим...' : 'Войти'}
               </Button>
             </form>
 

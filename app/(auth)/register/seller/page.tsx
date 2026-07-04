@@ -2,17 +2,23 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Navbar } from '@/components/layout/navbar'
+import { supabase, waitForActiveSession } from '@/lib/supabase'
+import { savePendingRegistration } from '@/lib/pending-registration'
 
 export default function RegisterSellerPage() {
+  const router = useRouter()
   const [form, setForm] = useState({
     phone: '', email: '', firstName: '', lastName: '',
     orgName: '', orgAddress: '', kaspiToken: '', kaspiShopId: '',
     promoCode: '', password: '', confirmPassword: '',
   })
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -31,7 +37,79 @@ export default function RegisterSellerPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO: логика отправки
+    setError('')
+
+    if (form.password !== form.confirmPassword) {
+      setError('Пароли не совпадают')
+      return
+    }
+
+    setLoading(true)
+
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+    })
+
+    if (signUpError || !data.user) {
+      setLoading(false)
+      setError(signUpError?.message ?? 'Не удалось создать аккаунт')
+      return
+    }
+
+    const profileData = {
+      role: 'seller' as const,
+      organization_name: form.orgName,
+      phone: form.phone,
+      first_name: form.firstName,
+      last_name: form.lastName,
+      org_address: form.orgAddress,
+      kaspi_token: form.kaspiToken,
+      kaspi_shop_id: form.kaspiShopId,
+      promo_code: form.promoCode,
+    }
+
+    if (!data.session) {
+      // Сессии ещё нет — почта не подтверждена. Insert прямо сейчас упрётся в RLS
+      // (auth.uid() == null), поэтому откладываем данные в pending_registrations до логина.
+      const pendingError = await savePendingRegistration(supabase, data.user.id, profileData)
+      setLoading(false)
+      if (pendingError) {
+        setError(pendingError.message)
+        return
+      }
+      setError(
+        'Мы отправили письмо для подтверждения почты. Подтвердите её и войдите — профиль магазина будет создан автоматически.',
+      )
+      return
+    }
+
+    // signUp() уже вернул session, insert можно делать сразу — но на всякий случай
+    // (гонка между resolve промиса и записью токена в клиент) даём короткое окно.
+    const confirmedSession = await waitForActiveSession(supabase, 5000)
+
+    if (!confirmedSession) {
+      setLoading(false)
+      setError('Не удалось завершить регистрацию, попробуйте войти вручную')
+      return
+    }
+
+    // id записи в sellers должен совпадать с id из auth.users,
+    // чтобы после логина профиль искался одним запросом по id текущего пользователя
+    const { role: _role, ...sellerFields } = profileData
+    const { error: insertError } = await supabase.from('sellers').insert({
+      id: data.user.id,
+      ...sellerFields,
+    })
+
+    setLoading(false)
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    router.push('/login')
   }
 
   return (
@@ -115,8 +193,10 @@ export default function RegisterSellerPage() {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full rounded-full py-6 text-base font-semibold">
-                Зарегистрировать магазин
+              {error && <p className="text-sm text-destructive">{error}</p>}
+
+              <Button type="submit" disabled={loading} className="w-full rounded-full py-6 text-base font-semibold">
+                {loading ? 'Создаём аккаунт...' : 'Зарегистрировать магазин'}
               </Button>
             </form>
           </div>
