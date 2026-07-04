@@ -67,18 +67,12 @@ export default function CourierDashboardPage() {
     const fetchOrders = async () => {
       setLoading(true)
 
-      console.log('DEBUG courierName используемый в фильтре:', JSON.stringify(courier.full_name))
-      console.log('DEBUG длина строки:', courier.full_name?.length)
-
       const { data, error } = await supabase
         .from('orders')
         .select('*')
         .eq('courier_name', courier.full_name)
         .neq('courier_stage', 'delivered')
         .order('created_at', { ascending: true })
-
-      console.log('DEBUG результат запроса:', data)
-      console.log('DEBUG ошибка запроса:', error)
 
       if (error) console.error(error.message)
       else setOrders(data as Order[])
@@ -156,11 +150,24 @@ export default function CourierDashboardPage() {
   }, [supabase, orders])
 
   async function updateStage(orderId: string, stage: CourierStage) {
+    const previousStage = orders.find((o) => o.id === orderId)?.courier_stage
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, courier_stage: stage } : o)),
+    )
+
     const { error } = await supabase
       .from('orders')
       .update({ courier_stage: stage })
       .eq('id', orderId)
-    if (error) console.error(error.message)
+
+    if (error) {
+      console.error(error.message)
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId && previousStage ? { ...o, courier_stage: previousStage } : o,
+        ),
+      )
+    }
   }
 
   async function confirmDelivery(order: Order) {
@@ -219,10 +226,7 @@ export default function CourierDashboardPage() {
           <Button
             size="sm"
             variant={order.courier_stage === 'departed' ? 'default' : 'outline'}
-            onClick={() => {
-              console.log('клик по Выехал')
-              updateStage(order.id, 'departed')
-            }}
+            onClick={() => updateStage(order.id, 'departed')}
           >
             <Truck className="mr-1.5 h-4 w-4" />
             Выехал
