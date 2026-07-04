@@ -20,12 +20,10 @@ export interface PendingSellerRegistration {
   role: 'seller'
   organization_name: string
   phone: string
-  first_name: string
-  last_name: string
-  org_address: string
+  full_name: string
+  organization_address: string
   kaspi_token: string
   kaspi_shop_id: string
-  promo_code: string
 }
 
 export type PendingRegistration = PendingCourierRegistration | PendingSellerRegistration

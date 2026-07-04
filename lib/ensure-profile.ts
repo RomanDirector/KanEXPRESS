@@ -33,12 +33,10 @@ export async function ensureProfileExists(
       id: userId,
       organization_name: tempData.organization_name,
       phone: tempData.phone,
-      first_name: tempData.first_name,
-      last_name: tempData.last_name,
-      org_address: tempData.org_address,
+      full_name: tempData.full_name,
+      organization_address: tempData.organization_address,
       kaspi_token: tempData.kaspi_token,
       kaspi_shop_id: tempData.kaspi_shop_id,
-      promo_code: tempData.promo_code,
     })
     if (error) return { success: false, error: error.message }
     return { success: true }

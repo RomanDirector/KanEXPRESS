@@ -61,12 +61,10 @@ export default function RegisterSellerPage() {
       role: 'seller' as const,
       organization_name: form.orgName,
       phone: form.phone,
-      first_name: form.firstName,
-      last_name: form.lastName,
-      org_address: form.orgAddress,
+      full_name: `${form.firstName} ${form.lastName}`.trim(),
+      organization_address: form.orgAddress,
       kaspi_token: form.kaspiToken,
       kaspi_shop_id: form.kaspiShopId,
-      promo_code: form.promoCode,
     }
 
     if (!data.session) {
