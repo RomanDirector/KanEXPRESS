@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, Map, BarChart2, LogOut } from 'lucide-react'
+import { LayoutDashboard, Map, BarChart2, User, LogOut } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { CourierContext, type CourierProfile } from '@/lib/courier-context'
 import { Spinner } from '@/components/ui/spinner'
@@ -12,6 +12,7 @@ const navItems = [
   { href: '/courier-dashboard', label: 'Мои заказы', icon: LayoutDashboard },
   { href: '/courier-map', label: 'Карта', icon: Map },
   { href: '/courier-stats', label: 'Статистика', icon: BarChart2 },
+  { href: '/courier-profile', label: 'Профиль', icon: User },
 ]
 
 export default function CourierLayout({ children }: { children: React.ReactNode }) {
