@@ -21,8 +21,8 @@ interface Order {
   courier_name: string
   status: string
   created_at: string
-  lat: number
-  lng: number
+  lat: number | null
+  lng: number | null
 }
 
 const STAGES: CourierStage[] = ['not_started', 'departed', 'arrived', 'delivered', 'returned']
@@ -43,10 +43,17 @@ const STAGE_MARKER_COLORS: Record<CourierStage, string> = {
   returned: '#ef4444',
 }
 
-const KAZAKHSTAN_CENTER: [number, number] = [71, 48]
-
-function routeUrl(order: Order) {
-  return `https://2gis.kz/routeSearch/rsType/car/to/${order.lng},${order.lat}`
+// Маршрут по координатам точнее, но они есть не у всех заказов (например,
+// пока Kaspi-синк не проставил геокодирование) — в таком случае строим
+// ссылку на поиск по текстовому адресу, а не молчим и не ведём в никуда.
+function routeUrl(order: Order): string | null {
+  if (order.lat && order.lng) {
+    return `https://2gis.kz/routeSearch/rsType/car/to/${order.lng},${order.lat}`
+  }
+  if (order.client_address) {
+    return `https://2gis.kz/almaty/search/${encodeURIComponent(order.client_address)}`
+  }
+  return null
 }
 
 export default function CourierMapPage() {
@@ -87,8 +94,8 @@ export default function CourierMapPage() {
 
   const points: MapPoint[] = filteredOrders.map((o) => ({
     id: o.id,
-    lat: o.lat,
-    lng: o.lng,
+    lat: o.lat ?? 0,
+    lng: o.lng ?? 0,
     order_number: o.order_number,
     client_address: o.client_address,
     client_phone: o.client_phone,
@@ -141,6 +148,7 @@ export default function CourierMapPage() {
                   const stage = STAGE_CONFIG[order.courier_stage]
                   const StageIcon = stage.icon
                   const isSelected = order.id === selectedId
+                  const route = routeUrl(order)
 
                   return (
                     <Card
@@ -170,17 +178,30 @@ export default function CourierMapPage() {
 
                       <div className="flex items-center justify-between">
                         <p className="font-black text-foreground">{order.courier_fee} ₸</p>
-                        <a
-                          href={routeUrl(order)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Button size="sm" variant="outline">
+                        {route ? (
+                          <a
+                            href={route}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button size="sm" variant="outline">
+                              <Navigation className="mr-1.5 h-3.5 w-3.5" />
+                              Маршрут в 2ГИС
+                            </Button>
+                          </a>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled
+                            title="Адрес не указан"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <Navigation className="mr-1.5 h-3.5 w-3.5" />
                             Маршрут в 2ГИС
                           </Button>
-                        </a>
+                        )}
                       </div>
                     </Card>
                   )
@@ -192,8 +213,6 @@ export default function CourierMapPage() {
               <div className="relative">
                 <MapGL
                   points={points}
-                  center={KAZAKHSTAN_CENTER}
-                  zoom={5}
                   height="600px"
                   statusColors={STAGE_MARKER_COLORS}
                   selectedId={selectedId}
