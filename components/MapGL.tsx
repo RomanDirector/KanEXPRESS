@@ -1,12 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { CircleMarker as MapglCircleMarker, Map as MapglMap } from '@2gis/mapgl/types'
-
-import { cn } from '@/lib/utils'
-import { Spinner } from '@/components/ui/spinner'
-
-export type OrderStatus = string
 
 export interface MapPoint {
   id: string
@@ -15,146 +9,193 @@ export interface MapPoint {
   order_number: string
   client_address: string
   client_phone: string
-  status: OrderStatus
+  status: string
   price: number
 }
 
-interface MapGLProps {
+export interface MapGLProps {
   points: MapPoint[]
   center?: [number, number]
   zoom?: number
   height?: string
-  onPointClick?: (point: MapPoint) => void
+  // Кастомные цвета маркеров по статусу — нужно на /courier-map, где статусов
+  // (стадий курьера) пять, а не три как в статусах заказа продавца.
+  // Если не передать — используются цвета по умолчанию для статусов заказа.
   statusColors?: Record<string, string>
+  // id точки, которую нужно подсветить (например, выбранная в списке слева карточка)
   selectedId?: string | null
+  onPointClick?: (point: MapPoint) => void
 }
-
-const ALMATY_CENTER: [number, number] = [76.889709, 43.238949]
 
 const DEFAULT_STATUS_COLORS: Record<string, string> = {
-  pending: '#eab308',
-  in_transit: '#3b82f6',
-  delivered: '#22c55e',
+  pending: '#F59E0B',
+  in_transit: '#3B82F6',
+  delivered: '#10B981',
 }
 
-const FALLBACK_COLOR = '#6b7280'
+// Разумные пределы Алматы — точки с некорректными координатами (null, 0, или
+// в другом городе/за пределами страны из-за битых данных) не должны попадать
+// в маркеры и тем более влиять на масштаб карты.
+const ALMATY_BOUNDS = {
+  latMin: 43.0,
+  latMax: 43.5,
+  lngMin: 76.5,
+  lngMax: 77.3,
+}
+
+function isValidAlmatyPoint(point: MapPoint) {
+  return (
+    !!point.lat &&
+    !!point.lng &&
+    point.lat >= ALMATY_BOUNDS.latMin &&
+    point.lat <= ALMATY_BOUNDS.latMax &&
+    point.lng >= ALMATY_BOUNDS.lngMin &&
+    point.lng <= ALMATY_BOUNDS.lngMax
+  )
+}
+
+function buildMarkerIcon(color: string, selected: boolean) {
+  const width = selected ? 40 : 32
+  const height = selected ? 50 : 40
+  const ring = selected ? '<circle cx="16" cy="16" r="14" fill="none" stroke="white" stroke-width="3"/>' : ''
+
+  return (
+    'data:image/svg+xml;base64,' +
+    btoa(
+      `<svg width="${width}" height="${height}" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">` +
+        `<path d="M16 0C7.163 0 0 7.163 0 16C0 28 16 40 16 40C16 40 32 28 32 16C32 7.163 24.837 0 16 0Z" fill="${color}"/>` +
+        ring +
+        '<circle cx="16" cy="16" r="7" fill="white"/>' +
+        '</svg>',
+    )
+  )
+}
 
 export function MapGL({
   points,
-  center = ALMATY_CENTER,
+  center = [76.889709, 43.238949],
   zoom = 12,
   height = '500px',
+  statusColors,
+  selectedId,
   onPointClick,
-  statusColors = DEFAULT_STATUS_COLORS,
-  selectedId = null,
 }: MapGLProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<MapglMap | null>(null)
-  const markersRef = useRef<MapglCircleMarker[]>([])
-  const onPointClickRef = useRef(onPointClick)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const mapRef = useRef<any>(null)
+  const mapglRef = useRef<any>(null)
+  const markersRef = useRef<any[]>([])
+  const [mapError, setMapError] = useState(false)
+  const [mapLoading, setMapLoading] = useState(true)
+  const [mapReady, setMapReady] = useState(false)
 
+  const colors = statusColors ?? DEFAULT_STATUS_COLORS
+
+  // Инициализация карты — один раз
   useEffect(() => {
-    onPointClickRef.current = onPointClick
-  }, [onPointClick])
+    if (!containerRef.current) return
 
-  useEffect(() => {
-    const key = process.env.NEXT_PUBLIC_2GIS_KEY
+    let destroyed = false
 
-    if (!key || !containerRef.current) {
-      setStatus('error')
-      return
-    }
+    const initMap = async () => {
+      try {
+        const mapglModule = await import('@2gis/mapgl')
+        const mapgl = await mapglModule.load()
 
-    let cancelled = false
+        if (destroyed || !containerRef.current) return
 
-    import('@2gis/mapgl')
-      .then(({ load }) => load())
-      .then((mapglAPI) => {
-        if (cancelled || !containerRef.current) return
-
-        const map = new mapglAPI.Map(containerRef.current, {
+        const map = new mapgl.Map(containerRef.current, {
           center,
           zoom,
-          key,
-        })
-
-        map.once('idle', () => {
-          if (!cancelled) setStatus('ready')
+          key: process.env.NEXT_PUBLIC_2GIS_KEY || '',
         })
 
         mapRef.current = map
-      })
-      .catch(() => {
-        if (!cancelled) setStatus('error')
-      })
+        mapglRef.current = mapgl
+        setMapLoading(false)
+        setMapReady(true)
+      } catch (err) {
+        console.error('2GIS map error:', err)
+        setMapError(true)
+        setMapLoading(false)
+      }
+    }
+
+    initMap()
 
     return () => {
-      cancelled = true
-      markersRef.current.forEach((marker) => marker.destroy())
+      destroyed = true
+      markersRef.current.forEach((m) => {
+        try {
+          m.destroy()
+        } catch {}
+      })
       markersRef.current = []
-      mapRef.current?.destroy()
-      mapRef.current = null
+      if (mapRef.current) {
+        try {
+          mapRef.current.destroy()
+        } catch {}
+        mapRef.current = null
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Обновление маркеров — при каждом изменении списка точек, цветов или выбранной точки
   useEffect(() => {
-    const map = mapRef.current
-    if (!map || status !== 'ready') return
+    if (!mapReady || !mapRef.current || !mapglRef.current) return
 
-    markersRef.current.forEach((marker) => marker.destroy())
+    // Удаляем старые маркеры
+    markersRef.current.forEach((m) => {
+      try {
+        m.destroy()
+      } catch {}
+    })
     markersRef.current = []
 
-    let cancelled = false
+    // Создаём новые маркеры — только для точек с корректными координатами в пределах Алматы
+    points.filter(isValidAlmatyPoint).forEach((point) => {
+      const isSelected = point.id === selectedId
+      const svgIcon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected)
 
-    import('@2gis/mapgl').then(({ load }) =>
-      load().then((mapglAPI) => {
-        if (cancelled) return
+      const marker = new mapglRef.current.Marker(mapRef.current, {
+        coordinates: [point.lng, point.lat],
+        icon: svgIcon,
+        anchor: isSelected ? [20, 50] : [16, 40],
+      })
 
-        markersRef.current = points.map((point) => {
-          const isSelected = point.id === selectedId
-          const marker = new mapglAPI.CircleMarker(map, {
-            coordinates: [point.lng, point.lat],
-            color: statusColors[point.status] ?? FALLBACK_COLOR,
-            diameter: isSelected ? 28 : 20,
-          })
+      marker.on('click', () => {
+        if (onPointClick) onPointClick(point)
+      })
 
-          marker.on('click', () => onPointClickRef.current?.(point))
+      markersRef.current.push(marker)
+    })
+  }, [mapReady, points, colors, selectedId, onPointClick])
 
-          return marker
-        })
-
-        if (selectedId) {
-          const selectedPoint = points.find((p) => p.id === selectedId)
-          if (selectedPoint) map.setCenter([selectedPoint.lng, selectedPoint.lat])
-        }
-      }),
+  if (mapError) {
+    return (
+      <div
+        className="rounded-2xl bg-gray-100 flex flex-col items-center justify-center gap-3"
+        style={{ height }}
+      >
+        <p className="text-gray-500 text-sm font-medium">Карта недоступна</p>
+        <p className="text-gray-400 text-xs">Проверьте API ключ 2GIS в .env.local</p>
+        <p className="text-gray-400 text-xs">NEXT_PUBLIC_2GIS_KEY=ваш_ключ</p>
+      </div>
     )
-
-    return () => {
-      cancelled = true
-    }
-  }, [points, status, selectedId, statusColors])
+  }
 
   return (
-    <div
-      className="relative w-full overflow-hidden rounded-2xl bg-neutral-100"
-      style={{ height }}
-    >
-      <div ref={containerRef} className="h-full w-full" />
-
-      {status === 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-neutral-100">
-          <Spinner className="size-6 text-neutral-400" />
+    <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
+      {mapLoading && (
+        <div className="absolute inset-0 bg-gray-100 flex items-center justify-center z-10 rounded-2xl">
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-gray-400 text-sm">Загружаем карту...</p>
+          </div>
         </div>
       )}
-
-      {status === 'error' && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-neutral-100 px-4 text-center text-sm text-neutral-500">
-          Карта недоступна, проверьте API ключ 2GIS
-        </div>
-      )}
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     </div>
   )
 }
+
+export default MapGL
