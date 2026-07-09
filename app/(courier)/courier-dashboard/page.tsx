@@ -8,6 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import {
   Package,
   Truck,
@@ -17,9 +26,10 @@ import {
   Phone,
   BarChart2,
   Store,
+  Ban,
 } from 'lucide-react'
 
-type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned'
+type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
 interface Order {
   id: string
@@ -41,7 +51,15 @@ const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; 
   arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
   delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
   returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
+  cancelled:   { label: 'Отменено',  icon: Ban,      className: 'border-red-200 bg-red-50 text-red-700' },
 }
+
+const CANCEL_REASONS: { value: string; label: string }[] = [
+  { value: 'Недозвон', label: 'Недозвон (не смог связаться с клиентом)' },
+  { value: 'Клиент отказался от заказа', label: 'Клиент отказался от заказа' },
+  { value: 'Не смог найти адрес', label: 'Не смог найти адрес' },
+  { value: 'other', label: 'Другое' },
+]
 
 function isToday(dateString: string) {
   const date = new Date(dateString)
@@ -62,6 +80,11 @@ export default function CourierDashboardPage() {
   const [codeErrors, setCodeErrors] = useState<Record<string, string>>({})
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({})
   const [todayStats, setTodayStats] = useState({ deliveredCount: 0, earned: 0 })
+  const [cancelOrder, setCancelOrder] = useState<Order | null>(null)
+  const [cancelReason, setCancelReason] = useState(CANCEL_REASONS[0].value)
+  const [cancelComment, setCancelComment] = useState('')
+  const [cancelError, setCancelError] = useState('')
+  const [cancelSubmitting, setCancelSubmitting] = useState(false)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -72,6 +95,7 @@ export default function CourierDashboardPage() {
         .select('*')
         .eq('courier_name', courier.full_name)
         .neq('courier_stage', 'delivered')
+        .neq('courier_stage', 'cancelled')
         .order('created_at', { ascending: true })
 
       if (error) console.error(error.message)
@@ -187,8 +211,53 @@ export default function CourierDashboardPage() {
     if (error) console.error(error.message)
   }
 
+  function openCancelDialog(order: Order) {
+    setCancelOrder(order)
+    setCancelReason(CANCEL_REASONS[0].value)
+    setCancelComment('')
+    setCancelError('')
+  }
+
+  function closeCancelDialog() {
+    setCancelOrder(null)
+    setCancelError('')
+    setCancelSubmitting(false)
+  }
+
+  async function submitCancel() {
+    if (!cancelOrder) return
+
+    const isOther = cancelReason === 'other'
+    if (isOther && !cancelComment.trim()) {
+      setCancelError('Опишите причину отмены')
+      return
+    }
+
+    setCancelSubmitting(true)
+    setCancelError('')
+
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        courier_stage: 'cancelled',
+        cancel_reason: isOther ? cancelComment.trim() : cancelReason,
+        cancelled_by: 'courier',
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq('id', cancelOrder.id)
+
+    if (error) {
+      console.error(error.message)
+      setCancelError('Не удалось отменить заказ, попробуйте снова')
+      setCancelSubmitting(false)
+      return
+    }
+
+    closeCancelDialog()
+  }
+
   const activeCount = orders.filter(
-    (o) => o.courier_stage !== 'delivered' && o.courier_stage !== 'returned',
+    (o) => o.courier_stage !== 'delivered' && o.courier_stage !== 'returned' && o.courier_stage !== 'cancelled',
   ).length
 
   const distinctSellerKeys = Array.from(new Set(orders.map((o) => o.seller_id ?? null)))
@@ -246,6 +315,15 @@ export default function CourierDashboardPage() {
           >
             <RotateCcw className="mr-1.5 h-4 w-4" />
             Возврат
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            onClick={() => openCancelDialog(order)}
+          >
+            <Ban className="mr-1.5 h-4 w-4" />
+            Отменить
           </Button>
         </div>
 
@@ -353,6 +431,53 @@ export default function CourierDashboardPage() {
           <div className="space-y-4">{orders.map(renderOrderCard)}</div>
         )}
       </main>
+
+      <Dialog open={!!cancelOrder} onOpenChange={(open) => !open && closeCancelDialog()}>
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Отменить заказ {cancelOrder?.order_number}</DialogTitle>
+            <DialogDescription>Укажите причину отмены</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            {CANCEL_REASONS.map((reason) => (
+              <label
+                key={reason.value}
+                className="flex items-center gap-2.5 rounded-xl border border-border px-3 py-2.5 text-sm cursor-pointer transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+              >
+                <input
+                  type="radio"
+                  name="cancel-reason"
+                  className="h-4 w-4 accent-primary"
+                  checked={cancelReason === reason.value}
+                  onChange={() => setCancelReason(reason.value)}
+                />
+                {reason.label}
+              </label>
+            ))}
+
+            {cancelReason === 'other' && (
+              <Textarea
+                value={cancelComment}
+                onChange={(e) => setCancelComment(e.target.value)}
+                placeholder="Опишите причину отмены"
+                className="mt-1"
+              />
+            )}
+          </div>
+
+          {cancelError && <p className="text-sm text-destructive">{cancelError}</p>}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeCancelDialog} disabled={cancelSubmitting}>
+              Назад
+            </Button>
+            <Button variant="destructive" onClick={submitCancel} disabled={cancelSubmitting}>
+              {cancelSubmitting ? 'Отменяем...' : 'Подтвердить отмену'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

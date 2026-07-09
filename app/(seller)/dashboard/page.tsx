@@ -4,12 +4,23 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
+import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle, Ban } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
+type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
 interface Order {
   id: string
@@ -17,6 +28,7 @@ interface Order {
   client_phone: string
   client_address: string
   status: OrderStatus
+  courier_stage: CourierStage | null
   price: number
   courier_name: string | null
   comment: string | null
@@ -24,6 +36,13 @@ interface Order {
   lng: number | null
   created_at: string
 }
+
+const SELLER_CANCEL_REASONS: { value: string; label: string }[] = [
+  { value: 'Нет в наличии', label: 'Нет в наличии' },
+  { value: 'Клиент передумал', label: 'Клиент передумал' },
+  { value: 'Дубликат заказа', label: 'Дубликат заказа' },
+  { value: 'other', label: 'Другое' },
+]
 
 const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React.ReactNode }> = {
   pending:    { color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200',  icon: <Package size={13} /> },
@@ -40,6 +59,11 @@ export default function SellerDashboard() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [distributing, setDistributing] = useState(false)
+  const [cancelOrder, setCancelOrder] = useState<Order | null>(null)
+  const [cancelReason, setCancelReason] = useState(SELLER_CANCEL_REASONS[0].value)
+  const [cancelComment, setCancelComment] = useState('')
+  const [cancelError, setCancelError] = useState('')
+  const [cancelSubmitting, setCancelSubmitting] = useState(false)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -88,6 +112,51 @@ export default function SellerDashboard() {
     if (selected.size === 0) return
     await supabase.from('orders').update({ status }).in('id', Array.from(selected))
     setSelected(new Set())
+  }
+
+  function openCancelDialog(order: Order) {
+    setCancelOrder(order)
+    setCancelReason(SELLER_CANCEL_REASONS[0].value)
+    setCancelComment('')
+    setCancelError('')
+  }
+
+  function closeCancelDialog() {
+    setCancelOrder(null)
+    setCancelError('')
+    setCancelSubmitting(false)
+  }
+
+  async function submitCancel() {
+    if (!cancelOrder) return
+
+    const isOther = cancelReason === 'other'
+    if (isOther && !cancelComment.trim()) {
+      setCancelError('Опишите причину отмены')
+      return
+    }
+
+    setCancelSubmitting(true)
+    setCancelError('')
+
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        courier_stage: 'cancelled',
+        cancel_reason: isOther ? cancelComment.trim() : cancelReason,
+        cancelled_by: 'seller',
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq('id', cancelOrder.id)
+
+    if (error) {
+      console.error(error.message)
+      setCancelError('Не удалось отменить заказ, попробуйте снова')
+      setCancelSubmitting(false)
+      return
+    }
+
+    closeCancelDialog()
   }
 
   const whatsappBroadcast = () => {
@@ -311,10 +380,13 @@ export default function SellerDashboard() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('courier')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('status')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((order) => (
+                {filtered.map((order) => {
+                  const isCancelled = order.courier_stage === 'cancelled'
+                  return (
                   <tr
                     key={order.id}
                     className={`hover:bg-gray-50 transition-colors ${selected.has(order.id) ? 'bg-red-50' : ''}`}
@@ -333,14 +405,36 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString('ru-RU')} ₸</td>
                     <td className="px-4 py-4 text-gray-600 text-xs">{order.courier_name || '—'}</td>
                     <td className="px-4 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
-                        {STATUS_STYLE[order.status].icon}
-                        {t(order.status)}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
+                          {STATUS_STYLE[order.status].icon}
+                          {t(order.status)}
+                        </span>
+                        {isCancelled && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border border-red-200 bg-red-50 text-red-700">
+                            <Ban size={12} />
+                            Отменён
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
+                    <td className="px-4 py-4">
+                      {order.status !== 'delivered' && !isCancelled && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => openCancelDialog(order)}
+                        >
+                          <Ban className="mr-1.5 h-3.5 w-3.5" />
+                          Отменить
+                        </Button>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -363,6 +457,53 @@ export default function SellerDashboard() {
           <MapGL points={mapPoints} height="300px" />
         </div>
       </main>
+
+      <Dialog open={!!cancelOrder} onOpenChange={(open) => !open && closeCancelDialog()}>
+        <DialogContent className="rounded-2xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Отменить заказ {cancelOrder?.order_number}</DialogTitle>
+            <DialogDescription>Укажите причину отмены</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            {SELLER_CANCEL_REASONS.map((reason) => (
+              <label
+                key={reason.value}
+                className="flex items-center gap-2.5 rounded-xl border border-gray-200 px-3 py-2.5 text-sm cursor-pointer transition-colors has-[:checked]:border-red-400 has-[:checked]:bg-red-50"
+              >
+                <input
+                  type="radio"
+                  name="seller-cancel-reason"
+                  className="h-4 w-4 accent-red-600"
+                  checked={cancelReason === reason.value}
+                  onChange={() => setCancelReason(reason.value)}
+                />
+                {reason.label}
+              </label>
+            ))}
+
+            {cancelReason === 'other' && (
+              <Textarea
+                value={cancelComment}
+                onChange={(e) => setCancelComment(e.target.value)}
+                placeholder="Опишите причину отмены"
+                className="mt-1"
+              />
+            )}
+          </div>
+
+          {cancelError && <p className="text-sm text-red-600">{cancelError}</p>}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeCancelDialog} disabled={cancelSubmitting}>
+              Назад
+            </Button>
+            <Button variant="destructive" onClick={submitCancel} disabled={cancelSubmitting}>
+              {cancelSubmitting ? 'Отменяем...' : 'Подтвердить отмену'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

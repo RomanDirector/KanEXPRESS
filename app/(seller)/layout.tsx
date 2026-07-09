@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, Ban } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
@@ -22,6 +22,7 @@ function Sidebar() {
     { href: '/stats',       label: t('stats'),     icon: BarChart2 },
     { href: '/staff',       label: t('staff'),     icon: Users },
     { href: '/archive',     label: t('archive'),   icon: Archive },
+    { href: '/cancelled',   label: t('cancelled'), icon: Ban },
   ]
 
   const handleLogout = async () => {

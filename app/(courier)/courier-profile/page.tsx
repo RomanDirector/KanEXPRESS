@@ -13,9 +13,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Store, Wallet, TrendingUp, CheckCircle, Package, Truck, MapPin, RotateCcw, Banknote } from 'lucide-react'
+import { Store, Wallet, TrendingUp, CheckCircle, Package, Truck, MapPin, RotateCcw, Banknote, Ban } from 'lucide-react'
 
-type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned'
+type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
 interface Order {
   id: string
@@ -34,6 +34,7 @@ const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; 
   arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
   delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
   returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
+  cancelled:   { label: 'Отменено',  icon: Ban,       className: 'border-red-200 bg-red-50 text-red-700' },
 }
 
 const HISTORY_LIMIT = 15
@@ -106,7 +107,7 @@ export default function CourierProfilePage() {
   const deliveredOrders = orders.filter((o) => o.courier_stage === 'delivered')
   const returnedOrders = orders.filter((o) => o.courier_stage === 'returned')
   const activeOrders = orders.filter(
-    (o) => o.courier_stage !== 'delivered' && o.courier_stage !== 'returned',
+    (o) => o.courier_stage !== 'delivered' && o.courier_stage !== 'returned' && o.courier_stage !== 'cancelled',
   )
 
   const totalEarned = deliveredOrders.reduce((sum, o) => sum + (o.courier_fee ?? 0), 0)
