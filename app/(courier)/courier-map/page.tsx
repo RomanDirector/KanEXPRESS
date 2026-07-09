@@ -1,13 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase'
 import { useCourier } from '@/lib/courier-context'
-import { MapGL, type MapPoint } from '@/components/MapGL'
+import type { MapPoint } from '@/components/MapGL'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Package, Truck, CheckCircle, RotateCcw, MapPin, Phone, Navigation } from 'lucide-react'
+
+const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned'
 
@@ -72,6 +75,7 @@ export default function CourierMapPage() {
         .select('*')
         .eq('courier_name', courier.full_name)
         .neq('courier_stage', 'delivered')
+        .neq('courier_stage', 'cancelled')
         .order('created_at', { ascending: true })
       if (error) console.error(error.message)
       else setOrders(data as Order[])
