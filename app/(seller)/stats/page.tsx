@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { TrendingUp, ShoppingBag, CheckCircle, BarChart3 } from 'lucide-react'
+import { TrendingUp, ShoppingBag, CheckCircle, BarChart3, RotateCcw, Ban } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+
+type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
 interface Order {
   id: string
   order_number: string
   status: string
+  courier_stage: CourierStage | null
   price: number
   courier_name: string | null
   created_at: string
@@ -54,6 +57,8 @@ export default function StatsPage() {
   const delivered = filtered.filter(o => o.status === 'delivered').length
   const pending = filtered.filter(o => o.status === 'pending').length
   const inTransit = filtered.filter(o => o.status === 'in_transit').length
+  const returned = filtered.filter(o => o.courier_stage === 'returned').length
+  const cancelled = filtered.filter(o => o.courier_stage === 'cancelled').length
   const deliveryRate = total > 0 ? Math.round((delivered / total) * 100) : 0
   const totalRevenue = filtered.reduce((sum, o) => sum + (o.price || 0), 0)
   const avgCheck = total > 0 ? Math.round(totalRevenue / total) : 0
@@ -109,7 +114,7 @@ export default function StatsPage() {
         ) : (
           <>
             {/* Финансовые карточки */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-6">
               <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm font-semibold text-gray-500">{t('totalRevenue')}</p>
@@ -148,6 +153,26 @@ export default function StatsPage() {
                   </div>
                 </div>
                 <p className="text-3xl font-black text-green-600">{delivered}</p>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">Возвраты</p>
+                  <div className="bg-red-50 p-2 rounded-xl">
+                    <RotateCcw size={18} className="text-red-600" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-red-600">{returned}</p>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-500">Отменено</p>
+                  <div className="bg-gray-100 p-2 rounded-xl">
+                    <Ban size={18} className="text-gray-500" />
+                  </div>
+                </div>
+                <p className="text-3xl font-black text-gray-500">{cancelled}</p>
               </div>
             </div>
 
