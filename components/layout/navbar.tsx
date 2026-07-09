@@ -36,6 +36,12 @@ export function Navbar() {
 
         <div className="hidden items-center gap-4 md:flex">
           <Link
+            href="/order-tracking"
+            className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 transition-colors hover:border-gray-300 hover:text-gray-900"
+          >
+            Отследить заказ
+          </Link>
+          <Link
             href="/login"
             className="text-sm text-gray-400 transition-colors hover:text-gray-900"
           >
@@ -76,9 +82,17 @@ export function Navbar() {
               </Link>
             ))}
             <div className="mt-2 flex flex-col gap-2 border-t border-gray-100 pt-4">
-              <Link href="/login" className="text-center text-sm text-gray-400 hover:text-gray-900">Войти</Link>
+              <Link
+                href="/order-tracking"
+                onClick={() => setOpen(false)}
+                className="rounded-full border border-gray-200 py-2.5 text-center text-sm font-semibold text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors"
+              >
+                Отследить заказ
+              </Link>
+              <Link href="/login" onClick={() => setOpen(false)} className="text-center text-sm text-gray-400 hover:text-gray-900">Войти</Link>
               <Link
                 href="/register"
+                onClick={() => setOpen(false)}
                 className="rounded-full border-2 border-primary py-2.5 text-center text-sm font-semibold text-primary hover:bg-primary hover:text-white transition-all"
               >
                 Регистрация
