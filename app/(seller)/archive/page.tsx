@@ -1,208 +1,286 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import * as XLSX from 'xlsx'
-import { FileSpreadsheet, Search, Calendar, Archive as ArchiveIcon, Package } from 'lucide-react'
-import { useLang } from '@/lib/i18n'
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import * as XLSX from 'xlsx';
 
-interface Order {
-  id: string
-  order_number: string
-  client_phone: string
-  client_address: string
-  status: string
-  price: number
-  courier_name: string | null
-  created_at: string
-  archived_at?: string
+interface ArchOrder {
+  id: string;
+  number: string;
+  shipped: boolean;
+  comment: string | null;
+  client_phone: string;
+  client_address: string;
+  status: string;
+  photo_url: string | null;
+  delivered_at: string | null;
+  created_at: string;
 }
 
+type Tab = 'delivered' | 'old';
+
 export default function ArchivePage() {
-  const { t } = useLang()
-  const [orders, setOrders] = useState<Order[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [filterDate, setFilterDate] = useState('')
-  const [tab, setTab] = useState<'recent' | 'old'>('recent')
+  const [tab, setTab] = useState<Tab>('delivered');
+  const [orders, setOrders] = useState<ArchOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'shipped' | 'not_shipped'>('all');
+  const [photoOrder, setPhotoOrder] = useState<ArchOrder | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    const fetchOrders = async () => {
-      setLoading(true)
+    load();
+  }, [tab]);
 
-      if (tab === 'recent') {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .eq('status', 'delivered')
-          .order('created_at', { ascending: false })
-        if (error) console.error(error.message)
-        else setOrders(data as Order[])
-      } else {
-        const { data, error } = await supabase
-          .from('archived_orders')
-          .select('*')
-          .order('archived_at', { ascending: false })
-        if (error) console.error(error.message)
-        else setOrders(data as Order[])
-      }
-
-      setLoading(false)
-    }
-    fetchOrders()
-  }, [tab])
-
-  const filtered = orders.filter((o) => {
-    const matchDate = !filterDate || (o.created_at || '').startsWith(filterDate)
-    const matchSearch =
-      (o.order_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (o.client_phone || '').includes(search) ||
-      (o.client_address || '').toLowerCase().includes(search.toLowerCase())
-    return matchDate && matchSearch
-  })
-
-  const exportToExcel = () => {
-    const data = filtered.map(o => ({
-      'Номер заказа': o.order_number,
-      'Телефон': o.client_phone,
-      'Адрес': o.client_address,
-      'Стоимость (₸)': o.price,
-      'Курьер': o.courier_name || '—',
-      'Дата заказа': new Date(o.created_at).toLocaleDateString('ru-RU'),
-      'Статус': 'Доставлено',
-    }))
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Архив')
-    XLSX.writeFile(wb, 'kanexpress-archive-' + new Date().toISOString().slice(0, 10) + '.xlsx')
+  async function load() {
+    setLoading(true);
+    const status = tab === 'delivered' ? 'delivered' : 'archived';
+    const { data } = await supabase
+      .from('orders')
+      .select(
+        'id, number, shipped, comment, client_phone, client_address, status, photo_url, delivered_at, created_at'
+      )
+      .eq('status', status)
+      .order('created_at', { ascending: false });
+    setOrders((data || []) as ArchOrder[]);
+    setLoading(false);
   }
 
-  const totalRevenue = filtered.reduce((sum, o) => sum + (o.price || 0), 0)
+  const filtered = useMemo(() => {
+    let list = orders;
+
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (o) =>
+          o.number.toLowerCase().includes(q) ||
+          o.client_phone.toLowerCase().includes(q) ||
+          o.client_address.toLowerCase().includes(q)
+      );
+    }
+
+    if (dateFrom) {
+      const from = new Date(dateFrom).getTime();
+      list = list.filter(
+        (o) => new Date(o.delivered_at || o.created_at).getTime() >= from
+      );
+    }
+    if (dateTo) {
+      const to = new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1;
+      list = list.filter(
+        (o) => new Date(o.delivered_at || o.created_at).getTime() <= to
+      );
+    }
+
+    if (statusFilter === 'shipped') list = list.filter((o) => o.shipped);
+    if (statusFilter === 'not_shipped') list = list.filter((o) => !o.shipped);
+
+    return list;
+  }, [orders, search, dateFrom, dateTo, statusFilter]);
+
+  const shippedCount = filtered.filter((o) => o.shipped).length;
+  const deliveredCount = filtered.filter((o) => o.status === 'delivered').length;
+
+  function exportExcel() {
+    const rows = filtered.map((o) => ({
+      Номер: o.number,
+      Отгрузка: o.shipped ? 'Отгружен' : 'Не отгружено',
+      Комментарий: o.comment || 'Не указано',
+      'Номер клиента': o.client_phone,
+      'Адрес клиента': o.client_address,
+      'Статус заказа': o.status === 'delivered' ? 'Выдан' : 'Архив',
+      Дата: o.delivered_at || o.created_at,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Архив');
+    XLSX.writeFile(wb, 'arhiv_zakazov.xlsx');
+  }
+
+  async function uploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !photoOrder) return;
+    setUploading(true);
+    const path = `${photoOrder.id}/${Date.now()}_${file.name}`;
+    const { error } = await supabase.storage
+      .from('order-photos')
+      .upload(path, file);
+    if (error) {
+      alert('Ошибка загрузки: ' + error.message);
+      setUploading(false);
+      return;
+    }
+    const { data: pub } = supabase.storage
+      .from('order-photos')
+      .getPublicUrl(path);
+    await supabase
+      .from('orders')
+      .update({ photo_url: pub.publicUrl })
+      .eq('id', photoOrder.id);
+    setUploading(false);
+    setPhotoOrder(null);
+    load();
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('archive')}</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Архив доставленных заказов</p>
-        </div>
+    <div className="p-4">
+      <div className="flex gap-2 mb-4">
         <button
-          onClick={exportToExcel}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-green-100"
+          onClick={() => setTab('delivered')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+            tab === 'delivered' ? 'bg-blue-600 text-white' : 'bg-white border'
+          }`}
         >
-          <FileSpreadsheet size={16} />
-          {t('exportExcel')}
+          Доставленные
         </button>
-      </header>
+        <button
+          onClick={() => setTab('old')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+            tab === 'old' ? 'bg-blue-600 text-white' : 'bg-white border'
+          }`}
+        >
+          Старый архив
+        </button>
+      </div>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <div className="flex flex-wrap items-end gap-3 mb-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Поиск…"
+          className="border-b px-2 py-1 focus:outline-none focus:border-blue-500 w-56"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as any)}
+          className="border rounded px-3 py-2 text-sm"
+        >
+          <option value="all">Отгрузка: все</option>
+          <option value="shipped">Отгружен</option>
+          <option value="not_shipped">Не отгружено</option>
+        </select>
+        <label className="text-sm">
+          <span className="block text-xs text-gray-500">Стартовая дата</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="border rounded px-2 py-1.5"
+          />
+        </label>
+        <label className="text-sm">
+          <span className="block text-xs text-gray-500">Конечная дата</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="border rounded px-2 py-1.5"
+          />
+        </label>
+        <button
+          onClick={exportExcel}
+          className="px-4 py-2 rounded bg-green-700 text-white text-sm font-bold uppercase ml-auto"
+        >
+          Вывести в Excel
+        </button>
+      </div>
 
-        {/* Карточки */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-            <p className="text-sm text-gray-500 font-medium">Всего в архиве</p>
-            <p className="text-4xl font-black text-gray-900 mt-2">{filtered.length}</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-green-100 p-5 shadow-sm">
-            <p className="text-sm text-green-600 font-medium">Выручка по архиву</p>
-            <p className="text-3xl font-black text-green-600 mt-2">{totalRevenue.toLocaleString('ru-RU')} ₸</p>
-          </div>
-        </div>
+      <div className="flex gap-4 mb-3 text-sm">
+        <span className="text-blue-700 font-semibold">Отгружено: {shippedCount}</span>
+        <span className="text-blue-700 font-semibold">Доставлено: {deliveredCount}</span>
+      </div>
 
-        {/* Табы */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setTab('recent')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-              tab === 'recent'
-                ? 'bg-red-600 text-white shadow-sm shadow-red-200'
-                : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'
-            }`}
+      <div className="bg-white rounded-xl border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left border-b bg-gray-50">
+              <th className="p-3">#</th>
+              <th className="p-3">Отгрузка</th>
+              <th className="p-3">Комментарий</th>
+              <th className="p-3">Номер клиента</th>
+              <th className="p-3">Адрес клиента</th>
+              <th className="p-3">Статус заказа</th>
+              <th className="p-3">📷</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={7} className="p-6 text-center text-gray-500">
+                  Загрузка…
+                </td>
+              </tr>
+            )}
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="p-6 text-center text-gray-500">
+                  Заказов нет
+                </td>
+              </tr>
+            )}
+            {filtered.map((o) => (
+              <tr key={o.id} className="border-b hover:bg-gray-50">
+                <td className="p-3 text-blue-600 font-semibold">{o.number}</td>
+                <td className="p-3">{o.shipped ? 'Отгружен' : 'Не отгружено'}</td>
+                <td className="p-3 text-gray-400">{o.comment || 'Не указано'}</td>
+                <td className="p-3">{o.client_phone}</td>
+                <td className="p-3">{o.client_address}</td>
+                <td className="p-3">{o.status === 'delivered' ? 'Выдан' : 'Архив'}</td>
+                <td className="p-3">
+                  <button
+                    onClick={() => setPhotoOrder(o)}
+                    className={`text-lg ${o.photo_url ? '' : 'opacity-40'}`}
+                    title={o.photo_url ? 'Смотреть фото' : 'Фото нет — загрузить'}
+                  >
+                    📷
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {photoOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPhotoOrder(null)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 w-96 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Package size={14} />
-            Доставленные (до 30 дней)
-          </button>
-          <button
-            onClick={() => setTab('old')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-              tab === 'old'
-                ? 'bg-red-600 text-white shadow-sm shadow-red-200'
-                : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-50'
-            }`}
-          >
-            <ArchiveIcon size={14} />
-            Старый архив (30+ дней)
-          </button>
+            <h3 className="font-bold mb-3">
+              Фото упаковки — заказ {photoOrder.number}
+            </h3>
+            {photoOrder.photo_url ? (
+              <img
+                src={photoOrder.photo_url}
+                alt="Фото упаковки"
+                className="w-full rounded-lg mb-3"
+              />
+            ) : (
+              <p className="text-gray-500 mb-3">Фото ещё не загружено</p>
+            )}
+            <label className="block px-4 py-2 rounded bg-blue-600 text-white text-center font-semibold cursor-pointer">
+              {uploading
+                ? 'Загружаю…'
+                : photoOrder.photo_url
+                ? 'Заменить фото'
+                : 'Загрузить фото'}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadPhoto}
+                className="hidden"
+                disabled={uploading}
+              />
+            </label>
+          </div>
         </div>
-
-        {/* Фильтры */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4 flex flex-wrap gap-3 shadow-sm">
-          <div className="flex items-center gap-2 flex-1 min-w-[200px] border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
-            <Search size={16} className="text-gray-400" />
-            <input
-              type="text"
-              placeholder={t('search')}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="bg-transparent text-sm w-full focus:outline-none text-gray-700 placeholder-gray-400"
-            />
-          </div>
-          <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
-            <Calendar size={16} className="text-gray-400" />
-            <input
-              type="date"
-              value={filterDate}
-              onChange={e => setFilterDate(e.target.value)}
-              className="bg-transparent text-sm text-gray-700 focus:outline-none"
-            />
-          </div>
-          {(filterDate || search) && (
-            <button
-              onClick={() => { setFilterDate(''); setSearch('') }}
-              className="text-sm text-red-500 hover:text-red-700 font-semibold px-2"
-            >
-              {t('reset')}
-            </button>
-          )}
-        </div>
-
-        {/* Таблица */}
-        {loading ? (
-          <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-20 text-gray-400 text-sm">
-            {tab === 'old' ? 'Старый архив пока пуст — заполнится через 30 дней автоматически' : t('notFound')}
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('orderNum')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('phone')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('address')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('price')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('courier')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-4 font-mono font-bold text-gray-900">{order.order_number}</td>
-                    <td className="px-5 py-4 text-gray-600">{order.client_phone}</td>
-                    <td className="px-5 py-4 text-gray-500 max-w-[180px] truncate">{order.client_address}</td>
-                    <td className="px-5 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString('ru-RU')} ₸</td>
-                    <td className="px-5 py-4 text-gray-600">{order.courier_name || '—'}</td>
-                    <td className="px-5 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="text-xs text-gray-400 mt-3 font-medium">{t('total')}: {filtered.length}</p>
-      </main>
+      )}
     </div>
-  )
+  );
 }

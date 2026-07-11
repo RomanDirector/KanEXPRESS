@@ -6,6 +6,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -90,18 +91,24 @@ export default function SellerDashboard() {
     setSelected(new Set())
   }
 
+  /**
+   * Рассылка «заказ принят» по всем pending-заказам.
+   * Браузер открывает по одной вкладке wa.me на каждый номер с интервалом,
+   * чтобы не словить блокировку попапов.
+   */
   const whatsappBroadcast = () => {
     const pendingOrders = orders.filter(o => o.status === 'pending')
     if (pendingOrders.length === 0) {
       alert('Нет заказов для рассылки!')
       return
     }
-    const firstOrder = pendingOrders[0]
-    const phone = firstOrder.client_phone.replace(/[^0-9]/g, '')
-    const msg = encodeURIComponent(
-      'Здравствуйте! Ваш заказ ' + firstOrder.order_number + ' принят и скоро будет передан курьеру. Спасибо за покупку! — KanEXpress'
-    )
-    window.open('https://wa.me/' + phone + '?text=' + msg, '_blank')
+
+    pendingOrders.forEach((order, i) => {
+      setTimeout(() => {
+        const text = waTemplates.order_accepted({ number: order.order_number })
+        openWhatsApp(order.client_phone, text)
+      }, i * 700)
+    })
   }
 
   const distributeOrders = async () => {
@@ -311,6 +318,7 @@ export default function SellerDashboard() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('courier')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('status')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">WA</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -339,6 +347,23 @@ export default function SellerDashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => {
+                          const template =
+                            order.status === 'delivered'
+                              ? waTemplates.order_delivered({ number: order.order_number })
+                              : order.status === 'in_transit'
+                              ? waTemplates.order_in_transit({ number: order.order_number })
+                              : waTemplates.order_accepted({ number: order.order_number })
+                          openWhatsApp(order.client_phone, template)
+                        }}
+                        className="text-green-600 font-bold text-xs hover:underline"
+                        title="Написать в WhatsApp"
+                      >
+                        WA
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

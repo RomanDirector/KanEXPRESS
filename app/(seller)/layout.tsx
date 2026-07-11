@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, MapPinned, TrendingDown } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 
@@ -13,13 +13,15 @@ function Sidebar() {
   const { lang, setLang, t } = useLang()
 
   const navItems = [
-    { href: '/dashboard',   label: t('dashboard'), icon: LayoutDashboard },
-    { href: '/invoices',    label: t('invoices'),  icon: FileText },
-    { href: '/orders-map',  label: t('map'),       icon: Map },
-    { href: '/tracking',    label: t('tracking'),  icon: Navigation },
-    { href: '/stats',       label: t('stats'),     icon: BarChart2 },
-    { href: '/staff',       label: t('staff'),     icon: Users },
-    { href: '/archive',     label: t('archive'),   icon: Archive },
+    { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
+    { href: '/invoices',        label: t('invoices'),      icon: FileText },
+    { href: '/orders-map',      label: t('map'),           icon: Map },
+    { href: '/delivery-zones',  label: t('deliveryZones'), icon: MapPinned },
+    { href: '/tracking',        label: t('tracking'),      icon: Navigation },
+    { href: '/demping',         label: t('demping'),       icon: TrendingDown },
+    { href: '/stats',           label: t('stats'),         icon: BarChart2 },
+    { href: '/staff',           label: t('staff'),         icon: Users },
+    { href: '/archive',         label: t('archive'),       icon: Archive },
   ]
 
   const handleLogout = async () => {
@@ -89,7 +91,7 @@ function Sidebar() {
       {/* Низ sidebar */}
       <div className="px-2">
         <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-          <p className="text-xs font-bold text-red-600">KanEXpress</p>
+          <p className="text-xs font-bold text-red-600">KanExpress</p>
           <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>
         </div>
       </div>
