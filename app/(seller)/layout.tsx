@@ -3,11 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-<<<<<<< HEAD
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, MapPinned, TrendingDown } from 'lucide-react'
-=======
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, Ban } from 'lucide-react'
->>>>>>> origin/roman/landing-fixed
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, MapPinned, TrendingDown, Ban } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
@@ -19,7 +15,6 @@ function Sidebar() {
   const { lang, setLang, t } = useLang()
 
   const navItems = [
-<<<<<<< HEAD
     { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
     { href: '/invoices',        label: t('invoices'),      icon: FileText },
     { href: '/orders-map',      label: t('map'),           icon: Map },
@@ -29,16 +24,7 @@ function Sidebar() {
     { href: '/stats',           label: t('stats'),         icon: BarChart2 },
     { href: '/staff',           label: t('staff'),         icon: Users },
     { href: '/archive',         label: t('archive'),       icon: Archive },
-=======
-    { href: '/dashboard',   label: t('dashboard'), icon: LayoutDashboard },
-    { href: '/invoices',    label: t('invoices'),  icon: FileText },
-    { href: '/orders-map',  label: t('map'),       icon: Map },
-    { href: '/tracking',    label: t('tracking'),  icon: Navigation },
-    { href: '/stats',       label: t('stats'),     icon: BarChart2 },
-    { href: '/staff',       label: t('staff'),     icon: Users },
-    { href: '/archive',     label: t('archive'),   icon: Archive },
-    { href: '/cancelled',   label: t('cancelled'), icon: Ban },
->>>>>>> origin/roman/landing-fixed
+    { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
   ]
 
   const handleLogout = async () => {
