@@ -1,41 +1,27 @@
-Добавь третью роль "admin" в систему авторизации, по аналогии с уже 
-существующими courier/seller.
+На форме регистрации продавца (роль "Магазин", поля Имя/Email/Пароль/Kaspi Token 
+и т.д.) кнопка "Создать аккаунт" должна вызывать реальную регистрацию, но по 
+факту (проверено через DevTools → Network) не отправляет ни одного запроса.
 
-1. В app/(auth)/login/page.tsx (или где сейчас логика редиректа после 
-   supabase.auth.signInWithPassword) — добавь проверку таблицы admins 
-   ПЕРЕД проверкой couriers и sellers:
-   
-   const { data: adminProfile } = await supabase
-     .from('admins')
-     .select('id')
-     .eq('id', user.id)
-     .single()
-   
-   if (adminProfile) {
-     router.push('/admin')
-     return
-   }
-   // дальше уже существующая проверка couriers, затем sellers
+Проверь текущий код этой формы. Подключи:
 
-2. Создай app/admin/layout.tsx — общий layout для админки:
-   - Проверяет сессию через supabase.auth.getUser()
-   - Проверяет что user.id есть в таблице admins (через createAdminClient(), 
-     не через обычный клиентский supabase — таблица admins не должна быть 
-     читаема напрямую с клиента)
-   - Если не админ — редирект на /login
-   - Простой sidebar: "Меню разработчика" с пунктами (пока один: 
-     "Ключи геокодера" → /admin/geocode-keys)
+const { data, error } = await supabase.auth.signUp({
+  email,
+  password,
+  options: { data: { full_name: name, role: 'seller' } }
+})
 
-3. Создай app/admin/page.tsx — стартовая страница меню разработчика, 
-   просто список доступных инструментов карточками (пока одна карточка 
-   на geocode-keys, задел на будущее для других служебных инструментов)
+При успехе — создай профиль в таблице sellers с id: data.user.id (используй 
+уже существующую функцию ensureProfileExists/pending_registrations если она 
+есть в проекте — раньше уже была реализована логика с черновиком регистрации 
+на случай Confirm Email, не дублируй её заново, переиспользуй).
 
-4. Обнови app/admin/geocode-keys/page.tsx и app/api/admin/geocode-keys/route.ts — 
-   убери проверку по ADMIN_EMAILS, замени на ту же проверку через таблицу 
-   admins (id пользователя есть в admins), консистентно с остальной админкой
+После успешной регистрации — редирект на /dashboard.
 
-5. Кнопка "Выйти" в sidebar /admin — обычный supabase.auth.signOut(), 
-   редирект на /login (тот же общий логин, никакого отдельного входа)
+Также проверь app/(auth)/login/page.tsx (или актуальный путь) — что кнопка 
+"Войти" реально вызывает supabase.auth.signInWithPassword(email, password), 
+а не просто визуальная форма без обработчика.
 
-Удали упоминания ADMIN_EMAILS/NEXT_PUBLIC_ADMIN_EMAILS если они остались 
-в коде с прошлых правок — переходим полностью на таблицу admins.
+Если найдёшь что вызовы signUp/signInWithPassword УЖЕ есть в коде и работают — 
+не трогай, просто подтверди мне что нашёл рабочую версию, и опиши в чём тогда 
+может быть проблема (например onClick не привязан к кнопке, форма не 
+сабмитится из-за ошибки валидации которая тихо блокирует отправку, и т.п.).
