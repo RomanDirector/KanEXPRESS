@@ -23,6 +23,7 @@ interface Order {
   comment: string | null
   lat: number | null
   lng: number | null
+  photo_url: string | null
   created_at: string
 }
 
@@ -41,6 +42,8 @@ export default function SellerDashboard() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [distributing, setDistributing] = useState(false)
+  const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -91,11 +94,6 @@ export default function SellerDashboard() {
     setSelected(new Set())
   }
 
-  /**
-   * Рассылка «заказ принят» по всем pending-заказам.
-   * Браузер открывает по одной вкладке wa.me на каждый номер с интервалом,
-   * чтобы не словить блокировку попапов.
-   */
   const whatsappBroadcast = () => {
     const pendingOrders = orders.filter(o => o.status === 'pending')
     if (pendingOrders.length === 0) {
@@ -167,6 +165,27 @@ export default function SellerDashboard() {
       status: o.status,
       price: o.price,
     }))
+
+  async function uploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !photoOrder) return
+    setUploading(true)
+
+    const path = `${photoOrder.id}/${Date.now()}_${file.name}`
+    const { error } = await supabase.storage.from('order-photos').upload(path, file)
+
+    if (error) {
+      alert('Ошибка загрузки: ' + error.message)
+      setUploading(false)
+      return
+    }
+
+    const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path)
+    await supabase.from('orders').update({ photo_url: pub.publicUrl }).eq('id', photoOrder.id)
+
+    setUploading(false)
+    setPhotoOrder(null)
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -319,6 +338,7 @@ export default function SellerDashboard() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('status')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">WA</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">📷</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -364,6 +384,15 @@ export default function SellerDashboard() {
                         WA
                       </button>
                     </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => setPhotoOrder(order)}
+                        className={`text-lg ${order.photo_url ? '' : 'opacity-40'}`}
+                        title={order.photo_url ? 'Смотреть фото' : 'Загрузить фото'}
+                      >
+                        📷
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -388,6 +417,36 @@ export default function SellerDashboard() {
           <MapGL points={mapPoints} height="300px" />
         </div>
       </main>
+
+      {/* Модалка фото */}
+      {photoOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPhotoOrder(null)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold mb-3">Фото упаковки — заказ {photoOrder.order_number}</h3>
+            {photoOrder.photo_url ? (
+              <img src={photoOrder.photo_url} alt="Фото упаковки" className="w-full rounded-xl mb-3" />
+            ) : (
+              <p className="text-gray-500 mb-3">Фото ещё не загружено</p>
+            )}
+            <label className="block px-4 py-2 rounded-xl bg-red-600 text-white text-center font-semibold cursor-pointer hover:bg-red-700">
+              {uploading ? 'Загружаю…' : photoOrder.photo_url ? 'Заменить фото' : 'Загрузить фото'}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadPhoto}
+                className="hidden"
+                disabled={uploading}
+              />
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
