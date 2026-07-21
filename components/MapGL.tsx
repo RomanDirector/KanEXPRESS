@@ -1,8 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useMemo } from 'react'
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
-interface MapPoint {
+export interface MapPoint {
   id: string
   lat: number
   lng: number
@@ -13,149 +16,133 @@ interface MapPoint {
   price: number
 }
 
-interface MapGLProps {
+export interface MapGLProps {
   points: MapPoint[]
   center?: [number, number]
   zoom?: number
   height?: string
+  // Кастомные цвета маркеров по статусу — нужно на /courier-map, где статусов
+  // (стадий курьера) шесть, а не три как в статусах заказа продавца.
+  // Если не передать — используются цвета по умолчанию для статусов заказа.
+  statusColors?: Record<string, string>
+  // id точки, которую нужно подсветить (например, выбранная в списке слева карточка)
+  selectedId?: string | null
   onPointClick?: (point: MapPoint) => void
 }
 
-const STATUS_COLORS: Record<string, string> = {
+const DEFAULT_STATUS_COLORS: Record<string, string> = {
+  // статусы заказа продавца
   pending: '#F59E0B',
   in_transit: '#3B82F6',
   delivered: '#10B981',
+  // стадии курьера — используются, если вызывающая страница не передала
+  // свой statusColors (обычно передаёт, см. STAGE_MARKER_COLORS на /courier-map)
+  not_started: '#9CA3AF',
+  departed: '#3B82F6',
+  arrived: '#F59E0B',
+  returned: '#EF4444',
+  cancelled: '#EF4444',
 }
 
-export default function MapGL({
+// Разумные пределы Алматы — точки с некорректными координатами (null, 0, или
+// в другом городе/за пределами страны из-за битых данных) не должны попадать
+// в маркеры и тем более влиять на масштаб карты.
+const ALMATY_BOUNDS = {
+  latMin: 43.0,
+  latMax: 43.5,
+  lngMin: 76.5,
+  lngMax: 77.3,
+}
+
+function isValidAlmatyPoint(point: MapPoint) {
+  return (
+    !!point.lat &&
+    !!point.lng &&
+    point.lat >= ALMATY_BOUNDS.latMin &&
+    point.lat <= ALMATY_BOUNDS.latMax &&
+    point.lng >= ALMATY_BOUNDS.lngMin &&
+    point.lng <= ALMATY_BOUNDS.lngMax
+  )
+}
+
+// Кастомная цветная иконка-пин через L.divIcon вместо L.Icon.Default — так
+// не возникает известная проблема Leaflet+webpack с битыми путями к
+// marker-icon.png/marker-shadow.png (default-иконка нигде не используется).
+function buildMarkerIcon(color: string, selected: boolean) {
+  const width = selected ? 40 : 32
+  const height = selected ? 50 : 40
+  const ring = selected
+    ? '<circle cx="16" cy="16" r="14" fill="none" stroke="white" stroke-width="3"/>'
+    : ''
+
+  const svg =
+    `<svg width="100%" height="100%" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">` +
+    `<path d="M16 0C7.163 0 0 7.163 0 16C0 28 16 40 16 40C16 40 32 28 32 16C32 7.163 24.837 0 16 0Z" fill="${color}"/>` +
+    ring +
+    '<circle cx="16" cy="16" r="7" fill="white"/>' +
+    '</svg>'
+
+  return L.divIcon({
+    html: svg,
+    className: '', // сбрасываем стандартные стили leaflet-div-icon (белый фон, рамка)
+    iconSize: [width, height],
+    iconAnchor: [width / 2, height],
+    popupAnchor: [0, -height],
+  })
+}
+
+export function MapGL({
   points,
-  center = [76.889709, 43.238949],
+  center = [43.238949, 76.889709],
   zoom = 12,
   height = '500px',
+  statusColors,
+  selectedId,
   onPointClick,
 }: MapGLProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<any>(null)
-  const mapglRef = useRef<any>(null)
-  const markersRef = useRef<any[]>([])
-  const [mapError, setMapError] = useState(false)
-  const [mapLoading, setMapLoading] = useState(true)
-  const [mapReady, setMapReady] = useState(false)
-
-  // Инициализация карты — один раз
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    let destroyed = false
-
-    const initMap = async () => {
-      try {
-        const mapglModule = await import('@2gis/mapgl')
-        const mapgl = await mapglModule.load()
-
-        if (destroyed || !containerRef.current) return
-
-        const map = new mapgl.Map(containerRef.current, {
-          center,
-          zoom,
-          key: process.env.NEXT_PUBLIC_2GIS_KEY || '',
-        })
-
-        mapRef.current = map
-        mapglRef.current = mapgl
-        setMapLoading(false)
-        setMapReady(true)
-      } catch (err) {
-        console.error('2GIS map error:', err)
-        setMapError(true)
-        setMapLoading(false)
-      }
-    }
-
-    initMap()
-
-    return () => {
-      destroyed = true
-      markersRef.current.forEach((m) => {
-        try {
-          m.destroy()
-        } catch {}
-      })
-      markersRef.current = []
-      if (mapRef.current) {
-        try {
-          mapRef.current.destroy()
-        } catch {}
-        mapRef.current = null
-      }
-    }
-  }, [])
-
-  // Обновление маркеров — при каждом изменении списка точек
-  useEffect(() => {
-    if (!mapReady || !mapRef.current || !mapglRef.current) return
-
-    // Удаляем старые маркеры
-    markersRef.current.forEach((m) => {
-      try {
-        m.destroy()
-      } catch {}
-    })
-    markersRef.current = []
-
-    // Создаём новые маркеры
-    points.forEach((point) => {
-      if (!point.lat || !point.lng) return
-
-      const svgIcon =
-        'data:image/svg+xml;base64,' +
-        btoa(
-          '<svg width="32" height="40" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-            '<path d="M16 0C7.163 0 0 7.163 0 16C0 28 16 40 16 40C16 40 32 28 32 16C32 7.163 24.837 0 16 0Z" fill="' +
-            (STATUS_COLORS[point.status] || '#EF4444') +
-            '"/>' +
-            '<circle cx="16" cy="16" r="7" fill="white"/>' +
-            '</svg>'
-        )
-
-      const marker = new mapglRef.current.Marker(mapRef.current, {
-        coordinates: [point.lng, point.lat],
-        icon: svgIcon,
-        anchor: [16, 40],
-      })
-
-      marker.on('click', () => {
-        if (onPointClick) onPointClick(point)
-      })
-
-      markersRef.current.push(marker)
-    })
-  }, [mapReady, points])
-
-  if (mapError) {
-    return (
-      <div
-        className="rounded-2xl bg-gray-100 flex flex-col items-center justify-center gap-3"
-        style={{ height }}
-      >
-        <p className="text-gray-500 text-sm font-medium">Карта недоступна</p>
-        <p className="text-gray-400 text-xs">Проверьте API ключ 2GIS в .env.local</p>
-        <p className="text-gray-400 text-xs">NEXT_PUBLIC_2GIS_KEY=ваш_ключ</p>
-      </div>
-    )
-  }
+  const colors = statusColors ?? DEFAULT_STATUS_COLORS
+  const validPoints = useMemo(() => points.filter(isValidAlmatyPoint), [points])
 
   return (
     <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
-      {mapLoading && (
-        <div className="absolute inset-0 bg-gray-100 flex items-center justify-center z-10 rounded-2xl">
-          <div className="flex flex-col items-center gap-2">
-            <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-400 text-sm">Загружаем карту...</p>
-          </div>
-        </div>
-      )}
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        style={{ width: '100%', height: '100%' }}
+        scrollWheelZoom
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; OpenStreetMap contributors'
+        />
+
+        {validPoints.map((point) => {
+          const isSelected = point.id === selectedId
+          const icon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected)
+
+          return (
+            <Marker
+              key={point.id}
+              position={[point.lat, point.lng]}
+              icon={icon}
+              eventHandlers={{
+                click: () => onPointClick?.(point),
+              }}
+            >
+              <Popup>
+                <div className="text-sm space-y-1">
+                  <p className="font-mono font-bold">{point.order_number}</p>
+                  <p>{point.client_address}</p>
+                  <p>{point.client_phone}</p>
+                  <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+      </MapContainer>
     </div>
   )
 }
+
+export default MapGL

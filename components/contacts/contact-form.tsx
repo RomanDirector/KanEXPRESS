@@ -12,7 +12,6 @@ export function ContactForm() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO: send to Supabase or email service
     setSent(true)
   }
 
@@ -24,8 +23,8 @@ export function ContactForm() {
             <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
           </svg>
         </div>
-        <h3 className="text-xl font-bold text-white">Сообщение отправлено!</h3>
-        <p className="mt-2 text-sm text-white/40">Мы ответим вам в течение часа.</p>
+        <h3 className="text-xl font-bold text-gray-900">Сообщение отправлено!</h3>
+        <p className="mt-2 text-sm text-gray-400">Мы ответим вам в течение часа.</p>
       </div>
     )
   }
@@ -33,11 +32,11 @@ export function ContactForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-white/5 bg-white/3 p-6 space-y-4"
+      className="rounded-2xl border border-gray-200 bg-gray-50 p-6 space-y-4"
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-white/40">
+          <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-400">
             Имя
           </label>
           <input
@@ -47,11 +46,11 @@ export function ContactForm() {
             placeholder="Ваше имя"
             value={form.name}
             onChange={handleChange}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder-gray-300 outline-none transition-all focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
           />
         </div>
         <div>
-          <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-white/40">
+          <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-400">
             Email
           </label>
           <input
@@ -61,20 +60,20 @@ export function ContactForm() {
             placeholder="you@example.com"
             value={form.email}
             onChange={handleChange}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder-gray-300 outline-none transition-all focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
           />
         </div>
       </div>
 
       <div>
-        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-white/40">
+        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-400">
           Вы являетесь
         </label>
         <select
           name="role"
           value={form.role}
           onChange={handleChange}
-          className="w-full rounded-xl border border-white/10 bg-dark px-4 py-3 text-sm text-white outline-none transition-all focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+          className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition-all focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
         >
           <option value="" disabled>Выберите роль...</option>
           <option value="seller">Продавец на Kaspi</option>
@@ -85,7 +84,7 @@ export function ContactForm() {
       </div>
 
       <div>
-        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-white/40">
+        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-400">
           Сообщение
         </label>
         <textarea
@@ -95,13 +94,13 @@ export function ContactForm() {
           placeholder="Опишите ваш вопрос или задачу..."
           value={form.message}
           onChange={handleChange}
-          className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+          className="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 placeholder-gray-300 outline-none transition-all focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
         />
       </div>
 
       <button
         type="submit"
-        className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-dark"
+        className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/50"
       >
         Отправить сообщение
       </button>

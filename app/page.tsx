@@ -2,350 +2,287 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Navbar } from '@/components/layout/navbar'
 import { Footer } from '@/components/layout/footer'
+import { HowItWorks } from '@/components/sections/how-it-works'
+import { CtaSection } from '@/components/sections/cta-section'
 
 export const metadata: Metadata = {
-  title: 'KanExpress — Логистика для продавцов Kaspi.kz',
-  description: 'Автоматизируйте доставку заказов с Kaspi. Накладные, карта курьера, аналитика — всё в одном месте.',
+  title: 'KanExpress — Доставка товаров продавцов Kaspi.kz',
+  description: 'Быстро, надёжно и дешевле чем Kaspi. Автоматизируйте доставку заказов с Kaspi.kz.',
 }
 
-const FEATURES = [
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-      </svg>
-    ),
-    title: 'Авто-приём заказов',
-    desc: 'Kaspi Merchant API синхронизирует заказы каждые 10 минут. Никаких ручных переносов.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-      </svg>
-    ),
-    title: 'Накладные со штрихкодом',
-    desc: 'PDF одним кликом. Печатайте пакетом — хоть 100 накладных сразу.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.159.69.159 1.006 0Z" />
-      </svg>
-    ),
-    title: 'Карта и зоны',
-    desc: '2GIS-интеграция. Курьер видит свой район и оптимальный маршрут.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-      </svg>
-    ),
-    title: 'Аналитика в реальном времени',
-    desc: 'Сколько доставлено, сколько в пути, возвраты — всё на одном экране.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
-      </svg>
-    ),
-    title: 'WhatsApp-уведомления',
-    desc: 'Покупатель получает статус заказа автоматически — без вашего участия.',
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 2.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125m16.5 2.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-      </svg>
-    ),
-    title: 'Архив и история',
-    desc: 'pg_cron архивирует старые заказы еженедельно. Данные за любой период.',
-  },
+const PRICES = [
+  { weight: 'до 5 кг',  intime: '1 000 ₸', kaspiCity: '1 679 ₸', kaspiKaz: '1 455 ₸' },
+  { weight: '5–10 кг',  intime: '1 000 ₸', kaspiCity: '1 679 ₸', kaspiKaz: '1 903 ₸' },
+  { weight: '10–15 кг', intime: '2 000 ₸', kaspiCity: '1 679 ₸', kaspiKaz: '1 903 ₸' },
+  { weight: '15–20 кг', intime: '2 000 ₸', kaspiCity: '3 359 ₸', kaspiKaz: '4 031 ₸' },
+  { weight: '20–50 кг', intime: '3 000 ₸', kaspiCity: '3 359 ₸', kaspiKaz: '4 031 ₸' },
 ]
 
-const STEPS = [
-  { n: '01', title: 'Подключите Kaspi', desc: 'Вставьте API-ключ магазина — заказы начнут приходить автоматически.' },
-  { n: '02', title: 'Назначьте курьера', desc: 'Система предложит ближайшего курьера по зонам. Или назначьте вручную.' },
-  { n: '03', title: 'Отслеживайте онлайн', desc: 'Продавец, склад и курьер видят статус заказа в реальном времени.' },
+const BENEFITS = [
+  { title: 'Дешевле чем Kaspi',  desc: 'Наши тарифы значительно ниже стандартных тарифов Kaspi на доставку.' },
+  { title: 'Оплата по факту',    desc: 'Платите только за выполненные доставки. Никаких абонентских плат.' },
+  { title: 'Гибкие условия',     desc: 'Настройте расписание, зоны доставки и условия под ваш бизнес.' },
+  { title: 'Поддержка 24/7',     desc: 'Наша команда всегда на связи и готова помочь в любое время суток.' },
 ]
 
-const ROLES = [
-  {
-    label: 'Продавец',
-    color: 'border-primary/40 hover:border-primary',
-    desc: 'Видит все заказы, скачивает накладные пакетом, смотрит статистику и архив.',
-    points: ['Заказы из Kaspi в реальном времени', 'PDF-накладные со штрихкодом', 'Фильтры по дате и статусу', 'Финансовая статистика'],
-  },
-  {
-    label: 'Курьер',
-    color: 'border-white/10 hover:border-white/30',
-    desc: 'Карта с точками доставки, оптимальный маршрут, кнопка возврата.',
-    points: ['2GIS-карта с маршрутами', 'Фильтр по своему району', 'Статус каждого заказа', 'История доставок'],
-  },
-  {
-    label: 'Склад',
-    color: 'border-white/10 hover:border-white/30',
-    desc: 'Приёмка посылок, сканирование штрихкода, подтверждение и печать.',
-    points: ['Сканер штрихкода', 'Печать накладных', 'Подтверждение приёмки', 'Очередь отгрузки'],
-  },
-  {
-    label: 'Администратор',
-    color: 'border-white/10 hover:border-white/30',
-    desc: 'Рисует зоны на карте, распределяет курьеров, использует AI-оптимизацию.',
-    points: ['Полигоны зон на 2GIS', 'AI-распределение курьеров', 'Сводная аналитика', 'Управление командой'],
-  },
-]
-
-const PLANS = [
-  {
-    name: 'Старт',
-    price: 'Бесплатно',
-    sub: 'навсегда',
-    cta: 'Начать бесплатно',
-    ctaHref: '/register',
-    highlight: false,
-    features: ['До 50 заказов / мес', '1 курьер', 'Накладные PDF', 'Email-поддержка'],
-  },
-  {
-    name: 'Бизнес',
-    price: '9 900 ₸',
-    sub: 'в месяц',
-    cta: 'Попробовать 14 дней',
-    ctaHref: '/register',
-    highlight: true,
-    features: ['Неограниченно заказов', 'До 10 курьеров', 'WhatsApp-уведомления', '2GIS-карта', 'Аналитика', 'Приоритетная поддержка'],
-  },
-  {
-    name: 'Корпоративный',
-    price: 'По запросу',
-    sub: 'индивидуально',
-    cta: 'Связаться',
-    ctaHref: '/contacts',
-    highlight: false,
-    features: ['Неограниченно всего', 'SLA 99.9%', 'AI-распределение', 'Интеграции под ключ', 'Выделенный менеджер'],
-  },
+const REVIEWS = [
+  { name: 'Айгерим С.', role: 'Продавец Kaspi, Алматы', text: 'Отличный сервис! Доставка стала намного дешевле, а клиенты довольны быстрой доставкой. Рекомендую всем продавцам.' },
+  { name: 'Нурлан К.', role: 'Владелец интернет-магазина', text: 'Подключился за 5 минут, заказы пошли автоматически. Экономия на доставке составила около 40%.' },
+  { name: 'Дана М.', role: 'Магазин одежды, Астана', text: 'Сэкономили более 30% на доставке по сравнению с Kaspi. Очень удобная система, всё автоматически.' },
+  { name: 'Бауыржан Т.', role: 'Продавец электроники', text: 'Поддержка отвечает моментально. Система удобная, всё видно в реальном времени. Очень доволен!' },
+  { name: 'Жанар А.', role: 'Магазин косметики', text: 'Наконец-то нашли сервис с адекватными ценами. Курьеры пунктуальные и вежливые, клиенты довольны.' },
+  { name: 'Серик О.', role: 'Продавец бытовой техники', text: 'Работаем уже 3 месяца. Ни одного серьёзного сбоя. Система надёжная, очень рекомендую!' },
 ]
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-dark text-white">
+    <div className="min-h-screen bg-[#f8f8f8] text-gray-900">
       <Navbar />
 
       {/* ── HERO ── */}
-      <section className="relative flex min-h-screen items-center overflow-hidden pt-16">
-        <div aria-hidden className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 h-[600px] w-[600px] rounded-full bg-primary/8 blur-3xl" />
-        <div aria-hidden className="pointer-events-none absolute bottom-0 right-0 h-96 w-96 rounded-full bg-primary/5 blur-3xl" />
+      <section className="relative overflow-hidden pt-16">
+        {/* Gradient blob — из шаблона */}
+        <div
+          className="absolute right-0 top-0 h-[500px] w-[500px] animate-pulse rounded-full bg-gradient-to-br from-pink-400 via-orange-300 to-yellow-200 opacity-60 blur-3xl pointer-events-none"
+          aria-hidden="true"
+        />
 
-        <div className="mx-auto max-w-6xl px-4 py-24 text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-            Интеграция с Kaspi Merchant API
-          </div>
+        <div className="relative mx-auto max-w-6xl px-6 py-20 lg:py-32">
+          <div className="grid items-center gap-12 lg:grid-cols-2">
 
-          <h1 className="mx-auto max-w-3xl text-5xl font-black leading-tight tracking-tight sm:text-6xl lg:text-7xl">
-            Логистика для{' '}
-            <span className="text-primary">продавцов</span>{' '}
-            Kaspi.kz
-          </h1>
-
-          <p className="mx-auto mt-6 max-w-xl text-lg text-white/50 leading-relaxed">
-            Автоматизируйте доставку заказов — от Kaspi до двери покупателя. Накладные, карта курьера, WhatsApp-статусы.
-          </p>
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              href="/register"
-              className="rounded-xl bg-primary px-8 py-4 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 hover:shadow-primary/40 active:scale-95"
-            >
-              Начать бесплатно
-            </Link>
-            <Link
-              href="/#how"
-              className="rounded-xl border border-white/10 bg-white/5 px-8 py-4 text-base font-medium text-white/70 transition-all hover:bg-white/10 hover:text-white"
-            >
-              Как это работает →
-            </Link>
-          </div>
-
-          {/* Stats bar */}
-          <div className="mx-auto mt-20 grid max-w-2xl grid-cols-3 gap-px overflow-hidden rounded-2xl border border-white/5 bg-white/5">
-            {[
-              { n: '500+', label: 'продавцов' },
-              { n: '12 000', label: 'заказов в день' },
-              { n: '98%', label: 'доставлено вовремя' },
-            ].map((s) => (
-              <div key={s.label} className="bg-dark/60 px-6 py-5 text-center">
-                <div className="text-2xl font-black text-white">{s.n}</div>
-                <div className="mt-0.5 text-xs text-white/30">{s.label}</div>
+            {/* Left: text */}
+            <div className="animate-fadein">
+              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                Логистика для продавцов Kaspi.kz
               </div>
-            ))}
+
+              <h1 className="text-5xl font-light leading-tight tracking-tight text-gray-900 sm:text-6xl">
+                Доставка товаров<br />
+                продавцов{' '}
+                <span className="text-primary">Kaspi.kz</span>
+              </h1>
+
+              <p className="mt-6 text-lg font-light text-gray-500">
+                Быстро, надёжно и дешевле чем Kaspi
+              </p>
+              <p className="mt-3 text-sm text-gray-400 leading-relaxed max-w-sm">
+                Автоматизируйте доставку заказов — от Kaspi до двери покупателя. Без лишних звонков и таблиц.
+              </p>
+
+              <div className="mt-10 flex flex-wrap gap-4">
+                <Link
+                  href="/register/seller"
+                  className="relative rounded-full bg-primary px-8 py-3.5 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 active:scale-95"
+                >
+                  Подключить магазин
+                  <div className="absolute -inset-1.5 animate-spin-slow rounded-full border border-primary/30" />
+                </Link>
+                <Link
+                  href="/register-courier"
+                  className="rounded-full border-2 border-gray-200 px-8 py-3.5 text-sm font-medium text-gray-600 transition-all hover:border-gray-400 hover:text-gray-900"
+                >
+                  Стать курьером
+                </Link>
+              </div>
+
+              {/* Mini stats */}
+              <div className="mt-12 flex gap-10">
+                {[
+                  { n: '500+', label: 'продавцов' },
+                  { n: '12 000', label: 'заказов / день' },
+                  { n: '98%', label: 'вовремя' },
+                ].map((s) => (
+                  <div key={s.label}>
+                    <div className="text-2xl font-light text-gray-900">{s.n}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right: illustration */}
+            <div className="relative flex items-center justify-center min-h-[320px]">
+              <img
+                src="https://lovidostavka.kz/media/hero.webp"
+                alt="Доставка"
+                className="relative z-10 w-full max-w-md animate-float drop-shadow-2xl"
+              />
+              <img
+                src="https://lovidostavka.kz/media/heromini8.webp"
+                alt=""
+                className="absolute bottom-4 -left-2 z-20 w-28 sm:w-36 animate-float-delayed drop-shadow-xl"
+              />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── FEATURES ── */}
-      <section id="features" className="py-24 border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="mb-16 text-center">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Возможности</p>
-            <h2 className="text-4xl font-black tracking-tight">Всё что нужно для доставки</h2>
-            <p className="mt-4 text-white/40 max-w-md mx-auto">Один сервис заменяет таблицы, звонки и ручную сортировку накладных.</p>
+      {/* ── PRICE COMPARISON ── */}
+      <section className="py-20 bg-white">
+        <div className="mx-auto max-w-4xl px-6">
+          <div className="mb-12 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Тарифы</p>
+            <h2 className="text-4xl font-light tracking-tight text-gray-900">Сравнение цен на доставку</h2>
+            <p className="mt-3 text-gray-400 max-w-sm mx-auto text-sm">Убедитесь сами — наши цены выгоднее.</p>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-gray-100 shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#f8f8f8] border-b border-gray-100">
+                  <th className="px-6 pt-5 pb-3 text-left font-medium text-gray-500">
+                    <img src="/assets/2066733.png" alt="" className="mb-2 h-10 w-auto object-contain" />
+                    Вес
+                  </th>
+                  <th className="px-6 pt-5 pb-3 text-center font-semibold text-primary">In Time</th>
+                  <th className="px-6 pt-5 pb-3 text-center font-medium text-gray-400">
+                    <img src="/assets/logok.webp" alt="Kaspi" className="mb-2 h-10 w-auto object-contain mx-auto" />
+                    Kaspi город
+                  </th>
+                  <th className="px-6 pt-5 pb-3 text-center font-medium text-gray-400">Kaspi Казахстан</th>
+                </tr>
+              </thead>
+              <tbody>
+                {PRICES.map((row, i) => (
+                  <tr
+                    key={row.weight}
+                    className={`border-b border-gray-50 last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#f8f8f8]/60'}`}
+                  >
+                    <td className="px-6 py-4 font-medium text-gray-600">{row.weight}</td>
+                    <td className="px-6 py-4 text-center font-semibold text-primary text-base">{row.intime}</td>
+                    <td className="px-6 py-4 text-center text-gray-300 line-through">{row.kaspiCity}</td>
+                    <td className="px-6 py-4 text-center text-gray-300 line-through">{row.kaspiKaz}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <HowItWorks />
+
+      {/* ── BENEFITS ── */}
+      <section className="py-20 bg-[#f8f8f8]">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="grid items-center gap-12 lg:grid-cols-2">
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Преимущества</p>
+              <h2 className="mb-8 text-4xl font-light tracking-tight text-gray-900">Почему выбирают нас</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {BENEFITS.map((b) => (
+                  <div
+                    key={b.title}
+                    className="rounded-2xl bg-white overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md"
+                  >
+                    <div className="h-1 w-full bg-primary" />
+                    <div className="p-6">
+                      <h3 className="mb-2 font-semibold text-gray-900">{b.title}</h3>
+                      <p className="text-sm text-gray-400 leading-relaxed">{b.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col items-center lg:items-end">
+              <p className="mb-4 text-sm text-gray-300 tracking-wide">Наши преимущества</p>
+              <img
+                src="/assets/7-scaled-qrmyf8uxufz8w117whhoic926o0qn08hkqnsh0qb8w.jpg"
+                alt="Наши преимущества"
+                className="w-full max-w-md rounded-2xl object-cover shadow-sm"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── REVIEWS ── */}
+      <section className="py-20 bg-white">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="mb-12 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Отзывы</p>
+            <h2 className="text-4xl font-light tracking-tight text-gray-900">Что говорят клиенты</h2>
+            <p className="mt-3 text-gray-400 max-w-sm mx-auto text-sm">Более 500 продавцов уже работают с нами.</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f) => (
+            {REVIEWS.map((r) => (
               <div
-                key={f.title}
-                className="rounded-2xl border border-white/5 bg-white/3 p-6 transition-all hover:border-white/10 hover:bg-white/5"
+                key={r.name}
+                className="rounded-2xl border border-gray-100 bg-[#f8f8f8] p-6 transition-all hover:shadow-sm"
               >
-                <div className="mb-4 inline-flex rounded-xl bg-primary/10 p-3 text-primary">
-                  {f.icon}
+                <div className="mb-3 flex gap-0.5 text-primary">
+                  {'★★★★★'.split('').map((star, i) => <span key={i}>{star}</span>)}
                 </div>
-                <h3 className="mb-2 font-semibold text-white">{f.title}</h3>
-                <p className="text-sm text-white/40 leading-relaxed">{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── HOW IT WORKS ── */}
-      <section id="how" className="py-24 border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="mb-16 text-center">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Как работает</p>
-            <h2 className="text-4xl font-black tracking-tight">Три шага до первой доставки</h2>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div key={s.n} className="rounded-2xl border border-white/5 bg-white/3 p-6">
-                <span className="mb-4 block text-5xl font-black text-primary/20">{s.n}</span>
-                <h3 className="mb-2 font-semibold text-white">{s.title}</h3>
-                <p className="text-sm text-white/40 leading-relaxed">{s.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── ROLES ── */}
-      <section className="py-24 border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="mb-16 text-center">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Роли</p>
-            <h2 className="text-4xl font-black tracking-tight">Каждый видит своё</h2>
-            <p className="mt-4 text-white/40 max-w-md mx-auto">Один логин — правильный интерфейс в зависимости от роли в команде.</p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            {ROLES.map((r) => (
-              <div key={r.label} className={`rounded-2xl border bg-white/3 p-6 transition-all ${r.color}`}>
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-primary" />
-                  <h3 className="font-bold text-white">{r.label}</h3>
-                </div>
-                <p className="mb-4 text-sm text-white/40">{r.desc}</p>
-                <ul className="space-y-1.5">
-                  {r.points.map((p) => (
-                    <li key={p} className="flex items-center gap-2 text-sm text-white/60">
-                      <svg className="w-3.5 h-3.5 text-primary flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                      </svg>
-                      {p}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── PRICING ── */}
-      <section id="pricing" className="py-24 border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="mb-16 text-center">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Тарифы</p>
-            <h2 className="text-4xl font-black tracking-tight">Простые цены</h2>
-            <p className="mt-4 text-white/40">Начните бесплатно — платите когда вырастете.</p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            {PLANS.map((p) => (
-              <div
-                key={p.name}
-                className={[
-                  'relative flex flex-col rounded-2xl border p-6 transition-all',
-                  p.highlight
-                    ? 'border-primary bg-primary/5 shadow-xl shadow-primary/10'
-                    : 'border-white/5 bg-white/3',
-                ].join(' ')}
-              >
-                {p.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-0.5 text-xs font-bold text-white">
-                    Популярный
+                <p className="mb-4 text-sm text-gray-500 leading-relaxed">"{r.text}"</p>
+                <div className="flex items-center gap-3 pt-3 border-t border-gray-100">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm flex-shrink-0">
+                    {r.name[0]}
                   </div>
-                )}
-                <div className="mb-6">
-                  <p className="text-sm font-semibold text-white/40">{p.name}</p>
-                  <p className="mt-1 text-3xl font-black text-white">{p.price}</p>
-                  <p className="text-xs text-white/30">{p.sub}</p>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{r.name}</p>
+                    <p className="text-xs text-gray-400">{r.role}</p>
+                  </div>
                 </div>
-                <ul className="mb-8 flex-1 space-y-2.5">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-white/60">
-                      <svg className="w-3.5 h-3.5 text-primary flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                      </svg>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href={p.ctaHref}
-                  className={[
-                    'rounded-xl py-3 text-center text-sm font-semibold transition-all',
-                    p.highlight
-                      ? 'bg-primary text-white hover:bg-primary/90 shadow-lg shadow-primary/25'
-                      : 'border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white',
-                  ].join(' ')}
-                >
-                  {p.cta}
-                </Link>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── CTA BANNER ── */}
-      <section className="py-24 border-t border-white/5">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="relative overflow-hidden rounded-3xl bg-primary/10 border border-primary/20 p-12 text-center">
-            <div aria-hidden className="pointer-events-none absolute -top-16 left-1/2 -translate-x-1/2 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
-            <h2 className="relative text-4xl font-black tracking-tight">
-              Готовы автоматизировать доставку?
-            </h2>
-            <p className="relative mt-4 text-white/50 max-w-md mx-auto">
-              Подключитесь за 5 минут. Первые 50 заказов — бесплатно.
-            </p>
-            <div className="relative mt-8 flex flex-wrap items-center justify-center gap-4">
-              <Link
-                href="/register"
-                className="rounded-xl bg-primary px-8 py-4 font-bold text-white shadow-lg shadow-primary/25 transition-all hover:bg-primary/90 active:scale-95"
+      <CtaSection />
+
+      {/* ── FAQ ── */}
+      <section className="py-20 bg-[#f8f8f8]">
+        <div className="mx-auto max-w-3xl px-6">
+          <div className="mb-12 text-center">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">FAQ</p>
+            <h2 className="text-4xl font-light tracking-tight text-gray-900">Часто задаваемые вопросы</h2>
+            <p className="mt-3 text-gray-400 max-w-sm mx-auto text-sm">Не нашли ответ? Напишите нам в WhatsApp.</p>
+          </div>
+
+          <div className="space-y-2">
+            {[
+              { q: 'Как подключить мой магазин Kaspi.kz?', a: 'После регистрации перейдите в настройки и вставьте API-ключ вашего магазина из личного кабинета Kaspi Merchant. Заказы начнут поступать автоматически в течение 10 минут.' },
+              { q: 'Сколько стоит доставка?', a: 'Тарифы начинаются от 1 000 ₸ за посылку до 5 кг. Это значительно дешевле стандартных тарифов Kaspi (от 1 455 ₸). Точные цены — в разделе "Сравнение цен" выше.' },
+              { q: 'Как быстро доставляются заказы?', a: 'По городу — в день заказа или на следующий день. Курьер видит оптимальный маршрут на карте 2GIS и приезжает к клиенту в удобное время.' },
+              { q: 'Что делать, если клиент отказался от товара?', a: 'Курьер оформляет возврат прямо в приложении. Посылка возвращается на склад, статус автоматически обновляется в вашем дашборде. Оплата за возврат не взимается.' },
+              { q: 'Как отслеживать статус доставки?', a: 'Все статусы обновляются в режиме реального времени в вашем личном кабинете. Покупатель получает WhatsApp-уведомление на каждом этапе — без вашего участия.' },
+              { q: 'Есть ли минимальное количество заказов?', a: 'Нет. На тарифе "Старт" — бесплатно до 50 заказов в месяц. Платите только когда вырастете и перейдёте на тариф "Бизнес".' },
+              { q: 'Работает ли сервис в других городах Казахстана?', a: 'Сейчас работаем в Алматы. Астана и другие крупные города — в планах на ближайший квартал. Оставьте заявку, и мы сообщим о запуске в вашем городе.' },
+              { q: 'Как происходит оплата за услуги?', a: 'Оплата только за фактически выполненные доставки. Раз в неделю формируется счёт, который можно оплатить картой или через Kaspi Pay. Никаких скрытых комиссий.' },
+            ].map((item) => (
+              <details
+                key={item.q}
+                className="group rounded-2xl border border-gray-100 bg-white open:shadow-sm transition-all"
               >
-                Зарегистрироваться
-              </Link>
-              <Link
-                href="/contacts"
-                className="rounded-xl border border-white/15 px-8 py-4 font-medium text-white/70 transition-all hover:text-white hover:border-white/30"
-              >
-                Задать вопрос
-              </Link>
-            </div>
+                <summary className="flex cursor-pointer items-center justify-between gap-4 px-6 py-5 font-medium text-gray-900 list-none">
+                  {item.q}
+                  <span className="flex-shrink-0 rounded-full bg-gray-100 p-1.5 text-gray-400 transition-all group-open:rotate-45 group-open:bg-primary/10 group-open:text-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                  </span>
+                </summary>
+                <p className="px-6 pb-5 text-sm text-gray-400 leading-relaxed">{item.a}</p>
+              </details>
+            ))}
+          </div>
+
+          <div className="mt-12 text-center">
+            <p className="text-gray-400 text-sm mb-4">Остались вопросы?</p>
+            <a
+              href="https://wa.me/77000000000"
+              className="inline-flex items-center gap-2 rounded-full bg-[#25D366] px-8 py-3.5 text-sm font-semibold text-white transition-all hover:bg-[#22c55e] active:scale-95"
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+              </svg>
+              Написать в WhatsApp
+            </a>
           </div>
         </div>
       </section>

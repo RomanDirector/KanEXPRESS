@@ -2,6 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 const ROLES = [
   {
@@ -57,10 +61,9 @@ export function RegisterForm() {
 
   return (
     <div className="w-full max-w-md space-y-8">
-      {/* Logo */}
       <div className="text-center space-y-1">
         <span className="text-3xl font-black tracking-tighter text-white">
-          IN<span className="text-primary">TIME</span>
+          Kan<span className="text-primary">EXPRESS</span>
         </span>
         <p className="text-sm text-white/40 tracking-widest uppercase">
           {step === 'role' ? 'Выберите роль' : 'Данные аккаунта'}
@@ -94,18 +97,7 @@ export function RegisterForm() {
                 <div className="font-semibold text-base leading-tight">{role.label}</div>
                 <div className="text-xs text-white/40 mt-0.5">{role.description}</div>
               </div>
-              <svg
-                className={[
-                  'ml-auto w-4 h-4 flex-shrink-0 transition-transform',
-                  selectedRole === role.id ? 'text-primary translate-x-0' : 'text-white/20 -translate-x-1',
-                ].join(' ')}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
+              <ArrowRight className="ml-auto w-4 h-4 flex-shrink-0 text-white/20 group-hover:text-white/40 transition-transform group-hover:translate-x-0.5" />
             </button>
           ))}
 
@@ -118,24 +110,23 @@ export function RegisterForm() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Selected role badge */}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => setStep('role')}
-            className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+            className="border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 rounded-full"
           >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-            </svg>
+            <ArrowLeft className="mr-1 h-3 w-3" />
             {ROLES.find((r) => r.id === selectedRole)?.label}
-          </button>
+          </Button>
 
           <div className="space-y-3">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-white/50 uppercase tracking-wider">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium uppercase tracking-wider text-white/40">
                 Имя
-              </label>
-              <input
+              </Label>
+              <Input
                 name="name"
                 type="text"
                 required
@@ -143,15 +134,15 @@ export function RegisterForm() {
                 placeholder="Ваше имя"
                 value={form.name}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/50 focus:bg-white/8 focus:ring-2 focus:ring-primary/20"
+                className="border-white/10 bg-white/5 text-white placeholder:text-white/20 focus-visible:ring-primary/50"
               />
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-white/50 uppercase tracking-wider">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium uppercase tracking-wider text-white/40">
                 Email
-              </label>
-              <input
+              </Label>
+              <Input
                 name="email"
                 type="email"
                 required
@@ -159,15 +150,15 @@ export function RegisterForm() {
                 placeholder="you@example.com"
                 value={form.email}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/50 focus:bg-white/8 focus:ring-2 focus:ring-primary/20"
+                className="border-white/10 bg-white/5 text-white placeholder:text-white/20 focus-visible:ring-primary/50"
               />
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-white/50 uppercase tracking-wider">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium uppercase tracking-wider text-white/40">
                 Пароль
-              </label>
-              <input
+              </Label>
+              <Input
                 name="password"
                 type="password"
                 required
@@ -175,17 +166,14 @@ export function RegisterForm() {
                 placeholder="Минимум 8 символов"
                 value={form.password}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/20 outline-none transition-all focus:border-primary/50 focus:bg-white/8 focus:ring-2 focus:ring-primary/20"
+                className="border-white/10 bg-white/5 text-white placeholder:text-white/20 focus-visible:ring-primary/50"
               />
             </div>
           </div>
 
-          <button
-            type="submit"
-            className="mt-2 w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:ring-offset-2 focus:ring-offset-dark"
-          >
+          <Button type="submit" className="w-full mt-2">
             Создать аккаунт
-          </button>
+          </Button>
 
           <p className="text-center text-sm text-white/30">
             Уже есть аккаунт?{' '}

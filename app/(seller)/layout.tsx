@@ -3,9 +3,15 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+<<<<<<< HEAD
 import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, MapPinned, TrendingDown } from 'lucide-react'
+=======
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, Ban } from 'lucide-react'
+>>>>>>> origin/roman/landing-fixed
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
+import { SellerContext, type SellerProfile } from '@/lib/seller-context'
+import { Spinner } from '@/components/ui/spinner'
 
 function Sidebar() {
   const pathname = usePathname()
@@ -13,6 +19,7 @@ function Sidebar() {
   const { lang, setLang, t } = useLang()
 
   const navItems = [
+<<<<<<< HEAD
     { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
     { href: '/invoices',        label: t('invoices'),      icon: FileText },
     { href: '/orders-map',      label: t('map'),           icon: Map },
@@ -22,6 +29,16 @@ function Sidebar() {
     { href: '/stats',           label: t('stats'),         icon: BarChart2 },
     { href: '/staff',           label: t('staff'),         icon: Users },
     { href: '/archive',         label: t('archive'),       icon: Archive },
+=======
+    { href: '/dashboard',   label: t('dashboard'), icon: LayoutDashboard },
+    { href: '/invoices',    label: t('invoices'),  icon: FileText },
+    { href: '/orders-map',  label: t('map'),       icon: Map },
+    { href: '/tracking',    label: t('tracking'),  icon: Navigation },
+    { href: '/stats',       label: t('stats'),     icon: BarChart2 },
+    { href: '/staff',       label: t('staff'),     icon: Users },
+    { href: '/archive',     label: t('archive'),   icon: Archive },
+    { href: '/cancelled',   label: t('cancelled'), icon: Ban },
+>>>>>>> origin/roman/landing-fixed
   ]
 
   const handleLogout = async () => {
@@ -99,41 +116,58 @@ function Sidebar() {
   )
 }
 
+// Проверка сессии + загрузка профиля продавца из sellers, как в app/(courier)/layout.tsx.
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const [seller, setSeller] = useState<SellerProfile | null>(null)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    const authEnabled = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true'
+    let cancelled = false
 
-    if (!authEnabled) {
-      setChecking(false)
-      return
-    }
+    async function checkAuth() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
+      if (!user) {
         router.push('/login')
-      } else {
-        setChecking(false)
+        return
       }
+
+      const { data: sellerProfile, error } = await supabase
+        .from('sellers')
+        .select('id, full_name, phone, email, organization_name, organization_address, kaspi_token, kaspi_shop_id, created_at')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (error || !sellerProfile) {
+        router.push('/login')
+        return
+      }
+
+      setSeller(sellerProfile as SellerProfile)
+      setChecking(false)
     }
+
     checkAuth()
+
+    return () => {
+      cancelled = true
+    }
   }, [router])
 
-  if (checking && process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true') {
+  if (checking || !seller) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-400 text-sm">Проверяем доступ...</p>
-        </div>
+        <Spinner className="size-6 text-muted-foreground" />
       </div>
     )
   }
 
-  return <>{children}</>
+  return <SellerContext.Provider value={seller}>{children}</SellerContext.Provider>
 }
 
 export default function SellerLayout({ children }: { children: React.ReactNode }) {

@@ -1,49 +1,41 @@
-Мы разрабатываем веб-приложение KanEXpress — логистический SaaS для продавцов Kaspi.kz в Казахстане.
+Добавь третью роль "admin" в систему авторизации, по аналогии с уже 
+существующими courier/seller.
 
-СТЕК:
-- Next.js (App Router) + TypeScript
-- Tailwind CSS
-- Supabase (база данных, авторизация, realtime)
-- Дизайн: красно-белый минималистичный, как Kaspi. Есть смена темы (тёмная/светлая) через next-themes
+1. В app/(auth)/login/page.tsx (или где сейчас логика редиректа после 
+   supabase.auth.signInWithPassword) — добавь проверку таблицы admins 
+   ПЕРЕД проверкой couriers и sellers:
+   
+   const { data: adminProfile } = await supabase
+     .from('admins')
+     .select('id')
+     .eq('id', user.id)
+     .single()
+   
+   if (adminProfile) {
+     router.push('/admin')
+     return
+   }
+   // дальше уже существующая проверка couriers, затем sellers
 
-РОЛИ В СИСТЕМЕ:
-1. Продавец (seller) — видит свои заказы из Kaspi, скачивает накладные с штрихкодом, статистика, архив, счета
-2. Курьер (courier) — карта с флажками, свой район, маршрут через 2GIS, кнопка возврат
-3. Склад (warehouse) — приёмка заказов, сканирование, печать накладных
-4. Администратор (admin) — чертит зоны на карте, распределяет курьеров, AI автораспределение
+2. Создай app/admin/layout.tsx — общий layout для админки:
+   - Проверяет сессию через supabase.auth.getUser()
+   - Проверяет что user.id есть в таблице admins (через createAdminClient(), 
+     не через обычный клиентский supabase — таблица admins не должна быть 
+     читаема напрямую с клиента)
+   - Если не админ — редирект на /login
+   - Простой sidebar: "Меню разработчика" с пунктами (пока один: 
+     "Ключи геокодера" → /admin/geocode-keys)
 
-СТРУКТУРА ПАПОК:
-app/
-  (auth)/login/
-  (auth)/register/
-  (seller)/dashboard/
-  (seller)/orders/
-  (seller)/invoices/
-  (seller)/stats/
-  (seller)/archive/
-  (courier)/map/
-  (courier)/profile/
-  (warehouse)/dashboard/
-  (admin)/zones/
-components/ui/
-lib/supabase.ts
+3. Создай app/admin/page.tsx — стартовая страница меню разработчика, 
+   просто список доступных инструментов карточками (пока одна карточка 
+   на geocode-keys, задел на будущее для других служебных инструментов)
 
-ИНТЕГРАЦИИ:
-- Kaspi Merchant API (получение заказов каждые 10 минут + realtime через Supabase)
-- 2GIS API (карта, маршруты, полигоны районов)
-- WhatsApp Business API (рассылка после заказа и доставки)
-- PDF-lib + JsBarcode (накладные со штрихкодом)
-- pg_cron (архивация старых заказов каждую неделю)
+4. Обнови app/admin/geocode-keys/page.tsx и app/api/admin/geocode-keys/route.ts — 
+   убери проверку по ADMIN_EMAILS, замени на ту же проверку через таблицу 
+   admins (id пользователя есть в admins), консистентно с остальной админкой
 
-РАЗДЕЛЕНИЕ:
-- Роман делает: лендинг, логин, регистрация, интерфейс курьера
-- Салмас делает: дашборд продавца, заказы, накладные, статистика, архив
+5. Кнопка "Выйти" в sidebar /admin — обычный supabase.auth.signOut(), 
+   редирект на /login (тот же общий логин, никакого отдельного входа)
 
-МОЯ ЗАДАЧА СЕЙЧАС:
-Сделай страницу дашборда продавца app/(seller)/dashboard/page.tsx
-- Список заказов (номер, статус, телефон клиента, адрес)
-- Кнопка "Скачать все накладные"
-- Статус заказа (не отгружено / в пути / доставлено)
-- Фильтр по дате и статусу
-- Дизайн красно-белый минималистичный, поддержка тёмной темы
-- Данные брать из Supabase таблицы orders
+Удали упоминания ADMIN_EMAILS/NEXT_PUBLIC_ADMIN_EMAILS если они остались 
+в коде с прошлых правок — переходим полностью на таблицу admins.
