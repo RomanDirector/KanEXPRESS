@@ -1,51 +1,41 @@
-Перепиши components/MapGL.tsx — сейчас он использует платный @2gis/mapgl, 
-нужно заменить на бесплатный Leaflet с тайлами OpenStreetMap, без каких-либо 
-API-ключей.
+Добавь третью роль "admin" в систему авторизации, по аналогии с уже 
+существующими courier/seller.
 
-Установи пакеты:
-npm install leaflet react-leaflet
-npm install --save-dev @types/leaflet
+1. В app/(auth)/login/page.tsx (или где сейчас логика редиректа после 
+   supabase.auth.signInWithPassword) — добавь проверку таблицы admins 
+   ПЕРЕД проверкой couriers и sellers:
+   
+   const { data: adminProfile } = await supabase
+     .from('admins')
+     .select('id')
+     .eq('id', user.id)
+     .single()
+   
+   if (adminProfile) {
+     router.push('/admin')
+     return
+   }
+   // дальше уже существующая проверка couriers, затем sellers
 
-ВАЖНО: сохрани ТОЧНО ТУ ЖЕ сигнатуру пропсов компонента, чтобы не сломать 
-все места где он уже используется:
-- points: массив { id, lat, lng, order_number, client_address, client_phone, status, price }
-- center: координаты центра, по умолчанию Алматы [43.238949, 76.889709] 
-  (ВНИМАНИЕ: Leaflet использует порядок [lat, lng], а не [lng, lat] как 2GIS — 
-  проверь и поправь везде порядок координат при переносе)
-- zoom: число, по умолчанию 12
-- height: строка высоты контейнера
-- onPointClick: колбэк при клике на точку
-- statusColors: кастомизация цветов маркеров по статусу
-- selectedId: подсветка выбранной точки
+2. Создай app/admin/layout.tsx — общий layout для админки:
+   - Проверяет сессию через supabase.auth.getUser()
+   - Проверяет что user.id есть в таблице admins (через createAdminClient(), 
+     не через обычный клиентский supabase — таблица admins не должна быть 
+     читаема напрямую с клиента)
+   - Если не админ — редирект на /login
+   - Простой sidebar: "Меню разработчика" с пунктами (пока один: 
+     "Ключи геокодера" → /admin/geocode-keys)
 
-Логика:
-1. 'use client' компонент (Leaflet не работает на сервере, нужен dynamic 
-   import с ssr: false там где компонент используется, если это ещё не так)
-2. TileLayer с бесплатными OSM тайлами: 
-   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-   attribution='&copy; OpenStreetMap contributors'
-3. Для каждой точки — Marker с кастомной цветной иконкой в зависимости от 
-   статуса (используй L.divIcon с HTML/CSS для цветного кружка/пина, как 
-   было цветовое кодирование в 2GIS версии: pending/not_started — серый, 
-   departed — синий, arrived — жёлтый/оранжевый, delivered — зелёный, 
-   returned/cancelled — красный)
-4. При клике на маркер — вызывай onPointClick с данными точки, открывай Popup 
-   с адресом/телефоном/суммой (как было в попапе деталей раньше)
-5. Если selectedId передан — выделяй эту точку визуально (например, больший 
-   размер иконки или обводка)
-6. Исправь стандартную проблему Leaflet с иконками маркеров по умолчанию 
-   (webpack не находит картинки) — либо используй только кастомные divIcon 
-   везде, либо явно импортируй leaflet/dist/images/marker-icon.png и настрой 
-   L.Icon.Default.mergeOptions
+3. Создай app/admin/page.tsx — стартовая страница меню разработчика, 
+   просто список доступных инструментов карточками (пока одна карточка 
+   на geocode-keys, задел на будущее для других служебных инструментов)
 
-Не забудь добавить импорт CSS: import 'leaflet/dist/leaflet.css' — если 
-компонент клиентский, это можно сделать прямо в файле компонента, или в 
-глобальный globals.css.
+4. Обнови app/admin/geocode-keys/page.tsx и app/api/admin/geocode-keys/route.ts — 
+   убери проверку по ADMIN_EMAILS, замени на ту же проверку через таблицу 
+   admins (id пользователя есть в admins), консистентно с остальной админкой
 
-Легенда цветов статусов (если была в 2GIS-версии в углу карты) — перенеси 
-как есть, просто HTML/CSS поверх карты, это не зависит от библиотеки карты.
+5. Кнопка "Выйти" в sidebar /admin — обычный supabase.auth.signOut(), 
+   редирект на /login (тот же общий логин, никакого отдельного входа)
 
-Проверь оба места использования после замены — app/(courier)/courier-map/page.tsx 
-и карту на дашборде продавца (app/(seller)/dashboard/page.tsx или где она 
-там называется) — обе должны продолжать работать без ошибок, просто на 
-других тайлах.
+Удали упоминания ADMIN_EMAILS/NEXT_PUBLIC_ADMIN_EMAILS если они остались 
+в коде с прошлых правок — переходим полностью на таблицу admins.
