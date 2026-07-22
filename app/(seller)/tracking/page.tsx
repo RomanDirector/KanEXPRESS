@@ -5,9 +5,14 @@ import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
 import { useLang } from '@/lib/i18n'
 
+function MapLoading() {
+  const { t } = useLang()
+  return <div className="flex items-center justify-center h-96 text-gray-400">{t('mapLoading2gis')}</div>
+}
+
 const CourierTrackingMap2GIS = dynamic(() => import('@/components/CourierTrackingMap2GIS'), {
   ssr: false,
-  loading: () => <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты 2GIS…</div>,
+  loading: () => <MapLoading />,
 })
 
 interface CourierWithOrders {
@@ -47,8 +52,8 @@ export default function TrackingPage() {
           <p className="text-sm text-gray-400 mt-0.5">{t('trackingSub')}</p>
         </div>
         <div className="flex rounded-xl border overflow-hidden">
-          <button onClick={() => setTab('map')} className={`px-4 py-2 text-sm font-bold ${tab === 'map' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>Карта</button>
-          <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-bold ${tab === 'list' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>Список</button>
+          <button onClick={() => setTab('map')} className={`px-4 py-2 text-sm font-bold ${tab === 'map' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>{t('map')}</button>
+          <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-bold ${tab === 'list' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>{t('list')}</button>
         </div>
       </header>
 
@@ -57,17 +62,17 @@ export default function TrackingPage() {
 
         {tab === 'list' && (
           <div className="space-y-4">
-            {loading && <p className="text-gray-400">Загрузка…</p>}
-            {!loading && couriers.length === 0 && <p className="text-gray-400">Курьеров нет</p>}
+            {loading && <p className="text-gray-400">{t('loading')}</p>}
+            {!loading && couriers.length === 0 && <p className="text-gray-400">{t('noCouriers')}</p>}
             {couriers.map((c) => (
               <div key={c.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
                   <div><span className="font-bold">{c.full_name}</span><span className="text-gray-400 ml-3 text-sm">{c.phone}</span></div>
-                  <span className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold">В пути: {c.orders.length}</span>
+                  <span className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold">{t('inTransitCount').replace('{count}', String(c.orders.length))}</span>
                 </div>
                 {c.orders.length > 0 && (
                   <table className="w-full text-sm">
-                    <thead><tr className="text-left text-gray-400 text-xs uppercase"><th className="py-1 pr-4">#</th><th className="py-1">Адрес</th></tr></thead>
+                    <thead><tr className="text-left text-gray-400 text-xs uppercase"><th className="py-1 pr-4">#</th><th className="py-1">{t('address')}</th></tr></thead>
                     <tbody>
                       {c.orders.map((o) => (
                         <tr key={o.id} className="border-t border-gray-50">

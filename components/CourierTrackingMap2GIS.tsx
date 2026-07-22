@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { load } from '@2gis/mapgl'
 import { supabase } from '@/lib/supabase'
+import { useLang } from '@/lib/i18n'
 
 const ALMATY_CENTER: [number, number] = [76.889709, 43.238949]
 const KEY = process.env.NEXT_PUBLIC_2GIS_KEY || ''
@@ -19,6 +20,7 @@ interface Courier {
 }
 
 export default function CourierTrackingMap2GIS() {
+  const { t } = useLang()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const mapglRef = useRef<any>(null)
@@ -85,7 +87,7 @@ export default function CourierTrackingMap2GIS() {
       if (o.courier_name) counts.set(o.courier_name, (counts.get(o.courier_name) || 0) + 1)
       const m = new mapgl.HtmlMarker(map, {
         coordinates: [o.lng, o.lat],
-        html: `<div title="Заказ ${o.order_number}" style="width:14px;height:14px;border-radius:50%;background:#f59e0b;border:3px solid #2563eb;box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer;"></div>`,
+        html: `<div title="${t('orderMarkerTitle').replace('{number}', o.order_number)}" style="width:14px;height:14px;border-radius:50%;background:#f59e0b;border:3px solid #2563eb;box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer;"></div>`,
         anchor: [7, 7],
       })
       orderMarkersRef.current.push(m)
@@ -135,14 +137,14 @@ export default function CourierTrackingMap2GIS() {
       <div ref={containerRef} className="w-full h-full" />
       {popup && (
         <div className="absolute top-3 right-3 z-10 bg-white rounded-xl shadow-lg p-4 w-64">
-          <p className="font-bold">🚚 {popup.name} {popup.offline && <span className="text-gray-400 text-xs">(офлайн)</span>}</p>
+          <p className="font-bold">🚚 {popup.name} {popup.offline && <span className="text-gray-400 text-xs">{t('offlineLabel')}</span>}</p>
           {popup.phone && <p className="text-sm text-gray-600 mt-1">📞 {popup.phone}</p>}
-          <p className="text-sm text-gray-600 mt-1">📦 Активных заказов: <b>{popup.orders}</b></p>
+          <p className="text-sm text-gray-600 mt-1">📦 {t('activeOrdersLabel')} <b>{popup.orders}</b></p>
           <div className="flex gap-2 mt-3">
             {popup.phone && (
               <a href={`https://wa.me/${popup.phone.replace(/[^\d]/g, '')}`} target="_blank" className="flex-1 text-center px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">WhatsApp</a>
             )}
-            <button onClick={() => setPopup(null)} className="px-3 py-2 rounded-lg border text-sm text-gray-600">Закрыть</button>
+            <button onClick={() => setPopup(null)} className="px-3 py-2 rounded-lg border text-sm text-gray-600">{t('close')}</button>
           </div>
         </div>
       )}

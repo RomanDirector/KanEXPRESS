@@ -5,6 +5,7 @@ import { load } from '@2gis/mapgl'
 import { createTerraDrawWithUI } from '@2gis/mapgl-terra-draw'
 import '@2gis/mapgl-terra-draw/dist/mapgl-terra-draw.css'
 import { supabase } from '@/lib/supabase'
+import { useLang } from '@/lib/i18n'
 
 const ALMATY_CENTER: [number, number] = [76.889709, 43.238949]
 const KEY = process.env.NEXT_PUBLIC_2GIS_KEY || ''
@@ -19,6 +20,7 @@ interface ZoneRow {
 }
 
 export default function ZoneMapEditor2GIS() {
+  const { t } = useLang()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<any>(null)
   const mapglRef = useRef<any>(null)
@@ -126,7 +128,7 @@ export default function ZoneMapEditor2GIS() {
 
     setSaving(false)
 
-    if (error || !data) { alert('Ошибка сохранения: ' + (error?.message || 'unknown')); return }
+    if (error || !data) { alert(t('zonesSaveError') + (error?.message || 'unknown')); return }
 
     drawRef.current.removeFeatures([pendingFeatureId])
     renderSavedZone(data as ZoneRow)
@@ -143,10 +145,10 @@ export default function ZoneMapEditor2GIS() {
 
   async function deleteZone() {
     if (!selectedZone) return
-    if (!confirm(`Удалить район «${selectedZone.name}»?`)) return
+    if (!confirm(t('zonesDeleteConfirm').replace('{name}', selectedZone.name))) return
 
     const { error } = await supabase.from('zones').delete().eq('id', selectedZone.id)
-    if (error) { alert('Ошибка удаления: ' + error.message); return }
+    if (error) { alert(t('zonesDeleteError') + error.message); return }
     savedPolygonsRef.current.get(selectedZone.id)?.destroy()
     savedPolygonsRef.current.delete(selectedZone.id)
     setSelectedZone(null)
@@ -163,37 +165,37 @@ export default function ZoneMapEditor2GIS() {
       <div ref={containerRef} className="w-full h-full" />
 
       <div className="absolute bottom-4 left-3 z-10 bg-white rounded-xl shadow-lg px-3 py-2 text-xs text-gray-500 max-w-[220px]">
-        Выбери «полигон» на панели слева на карте, нарисуй район кликами, заверши двойным кликом. Удалить сохранённый район — клик по нему справа.
+        {t('zonesInstructions')}
       </div>
 
       {selectedZone && (
         <div className="absolute top-3 right-3 z-10 bg-white rounded-xl shadow-lg p-4 w-60">
           <p className="font-bold mb-1" style={{ color: selectedZone.color }}>{selectedZone.name}</p>
           <div className="flex gap-2">
-            <button onClick={deleteZone} className="flex-1 px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-bold">🗑 Удалить</button>
-            <button onClick={() => setSelectedZone(null)} className="px-3 py-2 rounded-lg border text-sm text-gray-600">Закрыть</button>
+            <button onClick={deleteZone} className="flex-1 px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-bold">{t('zonesDeleteBtn')}</button>
+            <button onClick={() => setSelectedZone(null)} className="px-3 py-2 rounded-lg border text-sm text-gray-600">{t('close')}</button>
           </div>
         </div>
       )}
 
       <button onClick={resetView} className="absolute bottom-4 right-4 z-10 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-black shadow-lg">
-        АЛМАТЫ
+        {t('almaty')}
       </button>
 
       {nameModal && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl p-6 w-96 shadow-2xl">
-            <h3 className="text-lg font-bold mb-3">Название района</h3>
+            <h3 className="text-lg font-bold mb-3">{t('zoneNameTitle')}</h3>
             <input
               autoFocus value={zoneName} onChange={(e) => setZoneName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && saveZone()}
-              placeholder="Например: Бостандыкский"
+              placeholder={t('zoneNamePlaceholder')}
               className="w-full border rounded-xl px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-red-400"
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={cancelSave} className="px-4 py-2 rounded-xl border text-gray-600">Отмена</button>
+              <button onClick={cancelSave} className="px-4 py-2 rounded-xl border text-gray-600">{t('cancel')}</button>
               <button onClick={saveZone} disabled={saving || !zoneName.trim()} className="px-4 py-2 rounded-xl bg-red-600 text-white font-semibold disabled:opacity-50">
-                {saving ? 'Сохраняю…' : 'Сохранить'}
+                {saving ? t('saving') : t('save')}
               </button>
             </div>
           </div>

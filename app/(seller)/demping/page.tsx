@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useLang } from '@/lib/i18n';
 
 interface Rule {
   id: string;
   product_name: string;
   current_price: number;
   min_price: number;
+  max_price: number;
   step: number;
+  position: string | null;
+  image_url: string | null;
   is_active: boolean;
 }
 
@@ -22,6 +26,7 @@ interface HistoryRow {
 }
 
 export default function DempingPage() {
+  const { t } = useLang();
   const [tab, setTab] = useState<'rules' | 'history'>('rules');
   const [rules, setRules] = useState<Rule[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
@@ -31,7 +36,9 @@ export default function DempingPage() {
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newMin, setNewMin] = useState('');
+  const [newMax, setNewMax] = useState('');
   const [newStep, setNewStep] = useState('');
+  const [newPosition, setNewPosition] = useState('');
 
   useEffect(() => {
     loadAll();
@@ -42,7 +49,9 @@ export default function DempingPage() {
     const [{ data: r }, { data: h }] = await Promise.all([
       supabase
         .from('demping_rules')
-        .select('id, product_name, current_price, min_price, step, is_active')
+        .select(
+          'id, product_name, current_price, min_price, max_price, step, position, image_url, is_active'
+        )
         .order('product_name'),
       supabase
         .from('demping_history')
@@ -56,22 +65,26 @@ export default function DempingPage() {
   }
 
   async function addRule() {
-    if (!newName.trim() || !newPrice || !newMin || !newStep) return;
+    if (!newName.trim() || !newPrice || !newMin || !newMax || !newStep) return;
     const { data: userData } = await supabase.auth.getUser();
     const { error } = await supabase.from('demping_rules').insert({
       seller_id: userData?.user?.id,
       product_name: newName.trim(),
       current_price: Number(newPrice),
       min_price: Number(newMin),
+      max_price: Number(newMax),
       step: Number(newStep),
+      position: newPosition.trim() || null,
       is_active: true,
     });
-    if (error) alert('Ошибка: ' + error.message);
+    if (error) alert(t('errorPrefix') + error.message);
     else {
       setNewName('');
       setNewPrice('');
       setNewMin('');
+      setNewMax('');
       setNewStep('');
+      setNewPosition('');
       loadAll();
     }
   }
@@ -94,7 +107,7 @@ export default function DempingPage() {
       .eq('id', rule.id);
 
     if (e1) {
-      alert('Ошибка: ' + e1.message);
+      alert(t('errorPrefix') + e1.message);
       return;
     }
 
@@ -110,7 +123,7 @@ export default function DempingPage() {
   }
 
   async function deleteRule(rule: Rule) {
-    if (!confirm(`Удалить правило для "${rule.product_name}"?`)) return;
+    if (!confirm(t('deleteRuleConfirm').replace('{name}', rule.product_name))) return;
     await supabase.from('demping_rules').delete().eq('id', rule.id);
     loadAll();
   }
@@ -118,18 +131,17 @@ export default function DempingPage() {
   return (
     <div className="p-4">
       <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-        ⚠️ <b>Демпинг работает пока только в базе данных.</b> Реальное изменение
-        цен на Kaspi.kz подключим, как только будет Kaspi API токен.
+        ⚠️ <b>{t('dempingBannerBold')}</b> {t('dempingBannerRest')}
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold">Демпинг</h1>
+        <h1 className="text-xl font-bold">{t('demping')}</h1>
         <div className="flex gap-2">
           <button
             onClick={() => setShowCronInfo(true)}
             className="px-4 py-2 rounded-lg border text-sm font-semibold"
           >
-            Автозапуск по расписанию
+            {t('dempingCronBtn')}
           </button>
           <div className="flex rounded-lg border overflow-hidden">
             <button
@@ -138,7 +150,7 @@ export default function DempingPage() {
                 tab === 'rules' ? 'bg-blue-600 text-white' : 'bg-white'
               }`}
             >
-              Правила
+              {t('dempingRulesTab')}
             </button>
             <button
               onClick={() => setTab('history')}
@@ -146,7 +158,7 @@ export default function DempingPage() {
                 tab === 'history' ? 'bg-blue-600 text-white' : 'bg-white'
               }`}
             >
-              История
+              {t('dempingHistoryTab')}
             </button>
           </div>
         </div>
@@ -156,16 +168,16 @@ export default function DempingPage() {
         <>
           <div className="bg-white rounded-xl border p-4 mb-4 flex flex-wrap items-end gap-3">
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">Товар</span>
+              <span className="block text-xs text-gray-500">{t('productHeader')}</span>
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 className="border rounded px-2 py-1.5 w-48"
-                placeholder="Название товара"
+                placeholder={t('productNamePlaceholder')}
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">Текущая цена, ₸</span>
+              <span className="block text-xs text-gray-500">{t('currentPriceLabel')}</span>
               <input
                 type="number"
                 value={newPrice}
@@ -174,7 +186,7 @@ export default function DempingPage() {
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">Мин. цена, ₸</span>
+              <span className="block text-xs text-gray-500">{t('minPriceLabel')}</span>
               <input
                 type="number"
                 value={newMin}
@@ -183,7 +195,16 @@ export default function DempingPage() {
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">Шаг, ₸</span>
+              <span className="block text-xs text-gray-500">{t('maxPriceLabel')}</span>
+              <input
+                type="number"
+                value={newMax}
+                onChange={(e) => setNewMax(e.target.value)}
+                className="border rounded px-2 py-1.5 w-32"
+              />
+            </label>
+            <label className="text-sm">
+              <span className="block text-xs text-gray-500">{t('stepLabel')}</span>
               <input
                 type="number"
                 value={newStep}
@@ -191,11 +212,20 @@ export default function DempingPage() {
                 className="border rounded px-2 py-1.5 w-24"
               />
             </label>
+            <label className="text-sm">
+              <span className="block text-xs text-gray-500">{t('positionHeader')}</span>
+              <input
+                value={newPosition}
+                onChange={(e) => setNewPosition(e.target.value)}
+                className="border rounded px-2 py-1.5 w-28"
+                placeholder={t('positionPlaceholder')}
+              />
+            </label>
             <button
               onClick={addRule}
               className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold"
             >
-              Добавить правило
+              {t('addRuleBtn')}
             </button>
           </div>
 
@@ -203,69 +233,95 @@ export default function DempingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b bg-gray-50">
-                  <th className="p-3">Товар</th>
-                  <th className="p-3">Текущая цена</th>
-                  <th className="p-3">Мин. цена</th>
-                  <th className="p-3">Шаг</th>
-                  <th className="p-3">Активно</th>
-                  <th className="p-3">Действия</th>
+                  <th className="p-3">{t('photoHeader')}</th>
+                  <th className="p-3">{t('productHeader')}</th>
+                  <th className="p-3">{t('currentPriceHeader')}</th>
+                  <th className="p-3">{t('minPriceHeader')}</th>
+                  <th className="p-3">{t('maxPriceHeader')}</th>
+                  <th className="p-3">{t('positionHeader')}</th>
+                  <th className="p-3">{t('dempingHeader')}</th>
+                  <th className="p-3">{t('status')}</th>
+                  <th className="p-3">{t('actionsHeader')}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={6} className="p-6 text-center text-gray-500">
-                      Загрузка…
+                    <td colSpan={9} className="p-6 text-center text-gray-500">
+                      {t('loading')}
                     </td>
                   </tr>
                 )}
                 {!loading && rules.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="p-6 text-center text-gray-500">
-                      Правил нет
+                    <td colSpan={9} className="p-6 text-center text-gray-500">
+                      {t('noRules')}
                     </td>
                   </tr>
                 )}
-                {rules.map((r) => (
-                  <tr key={r.id} className="border-b hover:bg-gray-50">
-                    <td className="p-3 font-semibold">{r.product_name}</td>
-                    <td className="p-3">
-                      {r.current_price.toLocaleString('ru-RU')} ₸
-                      {r.current_price <= r.min_price && (
-                        <span className="ml-2 text-xs text-red-500">минимум</span>
-                      )}
-                    </td>
-                    <td className="p-3">{r.min_price.toLocaleString('ru-RU')} ₸</td>
-                    <td className="p-3">{r.step.toLocaleString('ru-RU')} ₸</td>
-                    <td className="p-3">
-                      <button
-                        onClick={() => toggleActive(r)}
-                        className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          r.is_active
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {r.is_active ? 'Вкл' : 'Выкл'}
-                      </button>
-                    </td>
-                    <td className="p-3 flex gap-2">
-                      <button
-                        onClick={() => decreaseOnce(r)}
-                        disabled={r.current_price <= r.min_price}
-                        className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
-                      >
-                        Снизить на шаг
-                      </button>
-                      <button
-                        onClick={() => deleteRule(r)}
-                        className="px-3 py-1 rounded border text-xs text-red-600"
-                      >
-                        Удалить
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {rules.map((r) => {
+                  const atMin = r.current_price <= r.min_price;
+                  return (
+                    <tr key={r.id} className="border-b hover:bg-gray-50">
+                      <td className="p-3">
+                        {r.image_url ? (
+                          <img
+                            src={r.image_url}
+                            alt={r.product_name}
+                            className="w-10 h-10 rounded object-cover border"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-gray-100 border flex items-center justify-center text-gray-400 text-xs">
+                            —
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 font-semibold">{r.product_name}</td>
+                      <td className="p-3">{r.current_price.toLocaleString('ru-RU')} ₸</td>
+                      <td className="p-3">{r.min_price.toLocaleString('ru-RU')} ₸</td>
+                      <td className="p-3">{r.max_price.toLocaleString('ru-RU')} ₸</td>
+                      <td className="p-3">{r.position || '—'}</td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => toggleActive(r)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            r.is_active
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {r.is_active ? t('on') : t('off')}
+                        </button>
+                      </td>
+                      <td className="p-3">
+                        {atMin ? (
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-yellow-100 text-yellow-700">
+                            {t('stuckAtMin')}
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                            {t('active')}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 flex gap-2">
+                        <button
+                          onClick={() => decreaseOnce(r)}
+                          disabled={atMin}
+                          className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
+                        >
+                          {t('decreaseStepBtn')}
+                        </button>
+                        <button
+                          onClick={() => deleteRule(r)}
+                          className="px-3 py-1 rounded border text-xs text-red-600"
+                        >
+                          {t('delete')}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -277,18 +333,18 @@ export default function DempingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b bg-gray-50">
-                <th className="p-3">Товар</th>
-                <th className="p-3">Было</th>
-                <th className="p-3">Стало</th>
-                <th className="p-3">Кем</th>
-                <th className="p-3">Когда</th>
+                <th className="p-3">{t('productHeader')}</th>
+                <th className="p-3">{t('wasLabel')}</th>
+                <th className="p-3">{t('becameLabel')}</th>
+                <th className="p-3">{t('byWhomLabel')}</th>
+                <th className="p-3">{t('whenLabel')}</th>
               </tr>
             </thead>
             <tbody>
               {history.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-6 text-center text-gray-500">
-                    История пуста
+                    {t('historyEmpty')}
                   </td>
                 </tr>
               )}
@@ -300,7 +356,7 @@ export default function DempingPage() {
                     {h.new_price.toLocaleString('ru-RU')} ₸
                   </td>
                   <td className="p-3">
-                    {h.triggered_by === 'auto' ? 'Авто' : 'Вручную'}
+                    {h.triggered_by === 'auto' ? t('autoLabel') : t('manualLabel')}
                   </td>
                   <td className="p-3 text-gray-500">
                     {new Date(h.created_at).toLocaleString('ru-RU')}
@@ -321,11 +377,8 @@ export default function DempingPage() {
             className="bg-white rounded-xl p-6 w-[560px] max-w-[90vw] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-bold mb-3">Автозапуск по расписанию</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Включается на стороне Supabase (pg_cron). Один раз выполни в SQL
-              Editor (сначала включи расширение pg_cron: Database → Extensions):
-            </p>
+            <h3 className="font-bold mb-3">{t('dempingCronBtn')}</h3>
+            <p className="text-sm text-gray-600 mb-3">{t('cronModalIntro')}</p>
             <pre className="bg-gray-900 text-green-300 text-xs rounded-lg p-3 overflow-x-auto mb-3">
 {`select cron.schedule(
   'daily-demping', '0 9 * * *',
@@ -344,13 +397,13 @@ export default function DempingPage() {
 );`}
             </pre>
             <p className="text-sm text-gray-600 mb-4">
-              Отключить: <code>select cron.unschedule('daily-demping');</code>
+              {t('cronDisableLabel')} <code>select cron.unschedule('daily-demping');</code>
             </p>
             <button
               onClick={() => setShowCronInfo(false)}
               className="px-4 py-2 rounded bg-blue-600 text-white font-semibold"
             >
-              Понятно
+              {t('gotIt')}
             </button>
           </div>
         </div>

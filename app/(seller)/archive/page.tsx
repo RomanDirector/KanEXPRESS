@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useLang } from '@/lib/i18n';
 import * as XLSX from 'xlsx';
 
 interface ArchOrder {
@@ -20,6 +21,7 @@ interface ArchOrder {
 type Tab = 'delivered' | 'old';
 
 export default function ArchivePage() {
+  const { t } = useLang();
   const [tab, setTab] = useState<Tab>('delivered');
   const [orders, setOrders] = useState<ArchOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,17 +87,17 @@ export default function ArchivePage() {
 
   function exportExcel() {
     const rows = filtered.map((o) => ({
-      Номер: o.number,
-      Отгрузка: o.shipped ? 'Отгружен' : 'Не отгружено',
-      Комментарий: o.comment || 'Не указано',
-      'Номер клиента': o.client_phone,
-      'Адрес клиента': o.client_address,
-      'Статус заказа': o.status === 'delivered' ? 'Выдан' : 'Архив',
-      Дата: o.delivered_at || o.created_at,
+      [t('numberCol')]: o.number,
+      [t('shipmentHeader')]: o.shipped ? t('shippedLabel') : t('notShippedLabel'),
+      [t('comment')]: o.comment || t('notSpecified'),
+      [t('clientPhoneHeader')]: o.client_phone,
+      [t('clientAddressHeader')]: o.client_address,
+      [t('orderStatusHeader')]: o.status === 'delivered' ? t('issuedLabel') : t('archive'),
+      [t('dateCol')]: o.delivered_at || o.created_at,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Архив');
+    XLSX.utils.book_append_sheet(wb, ws, t('archive'));
     XLSX.writeFile(wb, 'arhiv_zakazov.xlsx');
   }
 
@@ -108,7 +110,7 @@ export default function ArchivePage() {
       .from('order-photos')
       .upload(path, file);
     if (error) {
-      alert('Ошибка загрузки: ' + error.message);
+      alert(t('uploadErrorPrefix') + error.message);
       setUploading(false);
       return;
     }
@@ -133,7 +135,7 @@ export default function ArchivePage() {
             tab === 'delivered' ? 'bg-blue-600 text-white' : 'bg-white border'
           }`}
         >
-          Доставленные
+          {t('deliveredTab')}
         </button>
         <button
           onClick={() => setTab('old')}
@@ -141,7 +143,7 @@ export default function ArchivePage() {
             tab === 'old' ? 'bg-blue-600 text-white' : 'bg-white border'
           }`}
         >
-          Старый архив
+          {t('oldArchiveTab')}
         </button>
       </div>
 
@@ -149,7 +151,7 @@ export default function ArchivePage() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поиск…"
+          placeholder={t('searchDots')}
           className="border-b px-2 py-1 focus:outline-none focus:border-blue-500 w-56"
         />
         <select
@@ -157,12 +159,12 @@ export default function ArchivePage() {
           onChange={(e) => setStatusFilter(e.target.value as any)}
           className="border rounded px-3 py-2 text-sm"
         >
-          <option value="all">Отгрузка: все</option>
-          <option value="shipped">Отгружен</option>
-          <option value="not_shipped">Не отгружено</option>
+          <option value="all">{t('shipmentAll')}</option>
+          <option value="shipped">{t('shippedLabel')}</option>
+          <option value="not_shipped">{t('notShippedLabel')}</option>
         </select>
         <label className="text-sm">
-          <span className="block text-xs text-gray-500">Стартовая дата</span>
+          <span className="block text-xs text-gray-500">{t('dateFromLabel')}</span>
           <input
             type="date"
             value={dateFrom}
@@ -171,7 +173,7 @@ export default function ArchivePage() {
           />
         </label>
         <label className="text-sm">
-          <span className="block text-xs text-gray-500">Конечная дата</span>
+          <span className="block text-xs text-gray-500">{t('dateToLabel')}</span>
           <input
             type="date"
             value={dateTo}
@@ -183,13 +185,13 @@ export default function ArchivePage() {
           onClick={exportExcel}
           className="px-4 py-2 rounded bg-green-700 text-white text-sm font-bold uppercase ml-auto"
         >
-          Вывести в Excel
+          {t('exportExcelBtn')}
         </button>
       </div>
 
       <div className="flex gap-4 mb-3 text-sm">
-        <span className="text-blue-700 font-semibold">Отгружено: {shippedCount}</span>
-        <span className="text-blue-700 font-semibold">Доставлено: {deliveredCount}</span>
+        <span className="text-blue-700 font-semibold">{t('shippedCountLabel')} {shippedCount}</span>
+        <span className="text-blue-700 font-semibold">{t('deliveredCountLabel')} {deliveredCount}</span>
       </div>
 
       <div className="bg-white rounded-xl border overflow-x-auto">
@@ -197,11 +199,11 @@ export default function ArchivePage() {
           <thead>
             <tr className="text-left border-b bg-gray-50">
               <th className="p-3">#</th>
-              <th className="p-3">Отгрузка</th>
-              <th className="p-3">Комментарий</th>
-              <th className="p-3">Номер клиента</th>
-              <th className="p-3">Адрес клиента</th>
-              <th className="p-3">Статус заказа</th>
+              <th className="p-3">{t('shipmentHeader')}</th>
+              <th className="p-3">{t('comment')}</th>
+              <th className="p-3">{t('clientPhoneHeader')}</th>
+              <th className="p-3">{t('clientAddressHeader')}</th>
+              <th className="p-3">{t('orderStatusHeader')}</th>
               <th className="p-3">📷</th>
             </tr>
           </thead>
@@ -209,30 +211,30 @@ export default function ArchivePage() {
             {loading && (
               <tr>
                 <td colSpan={7} className="p-6 text-center text-gray-500">
-                  Загрузка…
+                  {t('loading')}
                 </td>
               </tr>
             )}
             {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="p-6 text-center text-gray-500">
-                  Заказов нет
+                  {t('noOrders')}
                 </td>
               </tr>
             )}
             {filtered.map((o) => (
               <tr key={o.id} className="border-b hover:bg-gray-50">
                 <td className="p-3 text-blue-600 font-semibold">{o.number}</td>
-                <td className="p-3">{o.shipped ? 'Отгружен' : 'Не отгружено'}</td>
-                <td className="p-3 text-gray-400">{o.comment || 'Не указано'}</td>
+                <td className="p-3">{o.shipped ? t('shippedLabel') : t('notShippedLabel')}</td>
+                <td className="p-3 text-gray-400">{o.comment || t('notSpecified')}</td>
                 <td className="p-3">{o.client_phone}</td>
                 <td className="p-3">{o.client_address}</td>
-                <td className="p-3">{o.status === 'delivered' ? 'Выдан' : 'Архив'}</td>
+                <td className="p-3">{o.status === 'delivered' ? t('issuedLabel') : t('archive')}</td>
                 <td className="p-3">
                   <button
                     onClick={() => setPhotoOrder(o)}
                     className={`text-lg ${o.photo_url ? '' : 'opacity-40'}`}
-                    title={o.photo_url ? 'Смотреть фото' : 'Фото нет — загрузить'}
+                    title={o.photo_url ? t('viewPhoto') : t('noPhotoUpload')}
                   >
                     📷
                   </button>
@@ -253,23 +255,23 @@ export default function ArchivePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-3">
-              Фото упаковки — заказ {photoOrder.number}
+              {t('packagingPhotoTitle').replace('{number}', photoOrder.number)}
             </h3>
             {photoOrder.photo_url ? (
               <img
                 src={photoOrder.photo_url}
-                alt="Фото упаковки"
+                alt={t('packagingPhotoAlt')}
                 className="w-full rounded-lg mb-3"
               />
             ) : (
-              <p className="text-gray-500 mb-3">Фото ещё не загружено</p>
+              <p className="text-gray-500 mb-3">{t('photoNotUploaded')}</p>
             )}
             <label className="block px-4 py-2 rounded bg-blue-600 text-white text-center font-semibold cursor-pointer">
               {uploading
-                ? 'Загружаю…'
+                ? t('uploadingLabel')
                 : photoOrder.photo_url
-                ? 'Заменить фото'
-                : 'Загрузить фото'}
+                ? t('replacePhoto')
+                : t('uploadPhotoBtn')}
               <input
                 type="file"
                 accept="image/*"
