@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, MapPinned, TrendingDown, Ban } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
@@ -25,6 +25,7 @@ function Sidebar() {
     { href: '/staff',           label: t('staff'),         icon: Users },
     { href: '/archive',         label: t('archive'),       icon: Archive },
     { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
+    { href: '/profile',         label: 'Профиль',          icon: User },
   ]
 
   const handleLogout = async () => {
@@ -81,15 +82,6 @@ function Sidebar() {
           )
         })}
       </nav>
-
-      {/* Выход */}
-      <button
-        onClick={handleLogout}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:bg-red-50 hover:text-red-600 transition-all mb-3"
-      >
-        <LogOut size={18} />
-        <span>Выйти</span>
-      </button>
 
       {/* Низ sidebar */}
       <div className="px-2">

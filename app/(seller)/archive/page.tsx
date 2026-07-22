@@ -105,7 +105,11 @@ export default function ArchivePage() {
     const file = e.target.files?.[0];
     if (!file || !photoOrder) return;
     setUploading(true);
-    const path = `${photoOrder.id}/${Date.now()}_${file.name}`;
+    const safeName = file.name
+      .replace(/[^\x00-\x7F]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .toLowerCase() || 'photo.jpg';
+    const path = `${photoOrder.id}/${Date.now()}_${safeName}`;
     const { error } = await supabase.storage
       .from('order-photos')
       .upload(path, file);
