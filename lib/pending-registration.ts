@@ -32,23 +32,32 @@ export async function savePendingRegistration(
   supabase: SupabaseClient,
   authUserId: string,
   data: PendingRegistration,
+  maxAttempts = 3,
 ) {
   const { role, ...formData } = data
 
-  // Отладка RLS: сессии на этом шаге обычно ещё нет (почта не подтверждена),
-  // это ожидаемо — insert должен проходить и без неё благодаря permissive-политике.
-  const { data: sessionData } = await supabase.auth.getSession()
-  console.log('[pending_registrations insert] auth_user_id:', authUserId)
-  console.log('[pending_registrations insert] getSession().session:', sessionData.session)
+  // auth.users иногда становится видимым для FK-проверки на стороне Supabase
+  // с небольшой задержкой после того, как signUp() уже вернул ответ клиенту —
+  // поэтому insert может словить 23503 (foreign_key_violation) даже когда
+  // пользователь реально создан. Ретраим на этот конкретный код ошибки.
+  let error: { code?: string; message: string } | null = null
 
-  const { error } = await supabase.from('pending_registrations').insert({
-    auth_user_id: authUserId,
-    role,
-    form_data: formData,
-  })
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const result = await supabase.from('pending_registrations').insert({
+      auth_user_id: authUserId,
+      role,
+      form_data: formData,
+    })
 
-  if (error) {
-    console.log('[pending_registrations insert] error:', error)
+    error = result.error
+    if (!error) return null
+
+    if (error.code === '23503' && attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 400 * attempt))
+      continue
+    }
+
+    break
   }
 
   return error

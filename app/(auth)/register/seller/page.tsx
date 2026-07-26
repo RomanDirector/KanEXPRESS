@@ -73,7 +73,10 @@ export default function RegisterSellerPage() {
       const pendingError = await savePendingRegistration(supabase, data.user.id, profileData)
       setLoading(false)
       if (pendingError) {
-        setError(pendingError.message)
+        // Аккаунт в auth.users уже создан (signUp() отработал успешно) — просто
+        // не удалось сохранить черновик анкеты. Не пугаем технической ошибкой,
+        // войти можно и без него, ensureProfileExists досоздаст профиль при логине.
+        setError('Не удалось завершить регистрацию, попробуйте войти — мы доделаем её автоматически')
         return
       }
       setError(
