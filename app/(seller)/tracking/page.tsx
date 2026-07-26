@@ -9,10 +9,10 @@ import { useLang } from '@/lib/i18n'
 
 function MapLoading() {
   const { t } = useLang()
-  return <div className="flex items-center justify-center h-96 text-gray-400">{t('mapLoading2gis')}</div>
+  return <div className="flex items-center justify-center h-96 text-gray-400">{t('loading')}</div>
 }
 
-const CourierTrackingMap2GIS = dynamic(() => import('@/components/CourierTrackingMap2GIS'), {
+const CourierTrackingMap = dynamic(() => import('@/components/CourierTrackingMap'), {
   ssr: false,
   loading: () => <MapLoading />,
 })
@@ -69,7 +69,7 @@ export default function TrackingPage() {
       </header>
 
       <main className="px-8 py-6 max-w-7xl mx-auto">
-        {tab === 'map' && <CourierTrackingMap2GIS />}
+        {tab === 'map' && <CourierTrackingMap />}
 
         {tab === 'list' && (
           <div className="space-y-4">

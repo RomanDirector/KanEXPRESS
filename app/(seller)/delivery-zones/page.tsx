@@ -8,11 +8,10 @@ import { assignZonesToOrders, loadZones } from '@/lib/zones'
 import { useLang } from '@/lib/i18n'
 
 function MapLoading() {
-  const { t } = useLang()
-  return <div className="flex items-center justify-center h-96 text-gray-400">{t('mapLoading2gis')}</div>
+  return <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты…</div>
 }
 
-const ZoneMapEditor2GIS = dynamic(() => import('@/components/ZoneMapEditor2GIS'), {
+const ZoneMapEditor = dynamic(() => import('@/components/ZoneMapEditor'), {
   ssr: false,
   loading: () => <MapLoading />,
 })
@@ -66,7 +65,7 @@ export default function DeliveryZonesPage() {
           </button>
         </div>
       </div>
-      <ZoneMapEditor2GIS />
+      <ZoneMapEditor />
     </div>
   )
 }
