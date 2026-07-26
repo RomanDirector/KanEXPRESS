@@ -45,8 +45,19 @@ export default function SellerDashboard() {
   const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
   const [uploading, setUploading] = useState(false)
 
+  async function refreshOrders() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) console.error(error.message)
+    else setOrders(data as Order[])
+    setLoading(false)
+  }
+
   useEffect(() => {
-    const fetchOrders = async () => {
+    async function fetchOrders() {
       setLoading(true)
       const { data, error } = await supabase
         .from('orders')
@@ -90,7 +101,8 @@ export default function SellerDashboard() {
 
   const massSetStatus = async (status: OrderStatus) => {
     if (selected.size === 0) return
-    await supabase.from('orders').update({ status }).in('id', Array.from(selected))
+    const { error } = await supabase.from('orders').update({ status }).in('id', Array.from(selected))
+    if (error) console.error(error)
     setSelected(new Set())
   }
 
@@ -118,10 +130,11 @@ export default function SellerDashboard() {
 
     setDistributing(true)
 
-    const { data: couriersData } = await supabase
+    const { data: couriersData, error: couriersError } = await supabase
       .from('couriers')
       .select('*')
       .eq('status', 'active')
+    if (couriersError) console.error(couriersError)
 
     if (!couriersData || couriersData.length === 0) {
       alert('Нет активных курьеров!')
@@ -131,10 +144,11 @@ export default function SellerDashboard() {
 
     for (let i = 0; i < pendingOrders.length; i++) {
       const courier = couriersData[i % couriersData.length]
-      await supabase
+      const { error } = await supabase
         .from('orders')
         .update({ courier_name: courier.full_name, status: 'in_transit' })
         .eq('id', pendingOrders[i].id)
+      if (error) console.error(error)
     }
 
     setDistributing(false)
@@ -185,10 +199,15 @@ export default function SellerDashboard() {
     }
 
     const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path)
-    await supabase.from('orders').update({ photo_url: pub.publicUrl }).eq('id', photoOrder.id)
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({ photo_url: pub.publicUrl })
+      .eq('id', photoOrder.id)
+    if (updateError) console.error(updateError)
 
     setUploading(false)
     setPhotoOrder(null)
+    refreshOrders()
   }
 
   return (

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 
@@ -46,7 +48,7 @@ export default function DempingPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: r }, { data: h }] = await Promise.all([
+    const [{ data: r, error: rErr }, { data: h, error: hErr }] = await Promise.all([
       supabase
         .from('demping_rules')
         .select(
@@ -59,6 +61,8 @@ export default function DempingPage() {
         .order('created_at', { ascending: false })
         .limit(200),
     ]);
+    if (rErr) console.error(rErr);
+    if (hErr) console.error(hErr);
     setRules((r || []) as Rule[]);
     setHistory((h || []) as HistoryRow[]);
     setLoading(false);
@@ -90,15 +94,16 @@ export default function DempingPage() {
   }
 
   async function toggleActive(rule: Rule) {
-    await supabase
+    const { error } = await supabase
       .from('demping_rules')
       .update({ is_active: !rule.is_active })
       .eq('id', rule.id);
+    if (error) console.error(error);
     loadAll();
   }
 
   async function decreaseOnce(rule: Rule) {
-    if (rule.current_price <= rule.min_price) return;
+    if (rule.current_price <= rule.min_price || !rule.is_active) return;
     const newPriceVal = Math.max(rule.current_price - rule.step, rule.min_price);
 
     const { error: e1 } = await supabase
@@ -107,24 +112,27 @@ export default function DempingPage() {
       .eq('id', rule.id);
 
     if (e1) {
+      console.error(e1);
       alert(t('errorPrefix') + e1.message);
       return;
     }
 
-    await supabase.from('demping_history').insert({
+    const { error: e2 } = await supabase.from('demping_history').insert({
       rule_id: rule.id,
       product_name: rule.product_name,
       old_price: rule.current_price,
       new_price: newPriceVal,
       triggered_by: 'manual',
     });
+    if (e2) console.error(e2);
 
     loadAll();
   }
 
   async function deleteRule(rule: Rule) {
     if (!confirm(t('deleteRuleConfirm').replace('{name}', rule.product_name))) return;
-    await supabase.from('demping_rules').delete().eq('id', rule.id);
+    const { error } = await supabase.from('demping_rules').delete().eq('id', rule.id);
+    if (error) console.error(error);
     loadAll();
   }
 
@@ -135,7 +143,16 @@ export default function DempingPage() {
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold">{t('demping')}</h1>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800"
+          >
+            <ArrowLeft size={16} />
+            {t('back')}
+          </Link>
+          <h1 className="text-xl font-bold">{t('demping')}</h1>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowCronInfo(true)}
@@ -261,6 +278,7 @@ export default function DempingPage() {
                 )}
                 {rules.map((r) => {
                   const atMin = r.current_price <= r.min_price;
+                  const stepDisabled = atMin || !r.is_active;
                   return (
                     <tr key={r.id} className="border-b hover:bg-gray-50">
                       <td className="p-3">
@@ -307,7 +325,7 @@ export default function DempingPage() {
                       <td className="p-3 flex gap-2">
                         <button
                           onClick={() => decreaseOnce(r)}
-                          disabled={atMin}
+                          disabled={stepDisabled}
                           className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
                         >
                           {t('decreaseStepBtn')}

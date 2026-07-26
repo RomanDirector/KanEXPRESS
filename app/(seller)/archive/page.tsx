@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 import * as XLSX from 'xlsx';
@@ -39,13 +41,14 @@ export default function ArchivePage() {
   async function load() {
     setLoading(true);
     const status = tab === 'delivered' ? 'delivered' : 'archived';
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .select(
         'id, number, shipped, comment, client_phone, client_address, status, photo_url, delivered_at, created_at'
       )
       .eq('status', status)
       .order('created_at', { ascending: false });
+    if (error) console.error(error);
     setOrders((data || []) as ArchOrder[]);
     setLoading(false);
   }
@@ -121,10 +124,11 @@ export default function ArchivePage() {
     const { data: pub } = supabase.storage
       .from('order-photos')
       .getPublicUrl(path);
-    await supabase
+    const { error: updateError } = await supabase
       .from('orders')
       .update({ photo_url: pub.publicUrl })
       .eq('id', photoOrder.id);
+    if (updateError) console.error(updateError);
     setUploading(false);
     setPhotoOrder(null);
     load();
@@ -132,6 +136,17 @@ export default function ArchivePage() {
 
   return (
     <div className="p-4">
+      <div className="flex items-center gap-3 mb-4">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800"
+        >
+          <ArrowLeft size={16} />
+          {t('back')}
+        </Link>
+        <h1 className="text-xl font-bold">{t('archive')}</h1>
+      </div>
+
       <div className="flex gap-2 mb-4">
         <button
           onClick={() => setTab('delivered')}

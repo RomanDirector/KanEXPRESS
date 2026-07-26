@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useLang } from '@/lib/i18n'
 
@@ -30,10 +32,12 @@ export default function TrackingPage() {
 
   async function loadList() {
     setLoading(true)
-    const { data: courierRows } = await supabase.from('couriers').select('id, full_name, phone')
-    const { data: orderRows } = await supabase
+    const { data: courierRows, error: courierErr } = await supabase.from('couriers').select('id, full_name, phone')
+    if (courierErr) console.error(courierErr)
+    const { data: orderRows, error: orderErr } = await supabase
       .from('orders').select('id, order_number, client_address, courier_name, status')
       .eq('status', 'in_transit')
+    if (orderErr) console.error(orderErr)
 
     const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({
       id: c.id, full_name: c.full_name, phone: c.phone,
@@ -48,6 +52,13 @@ export default function TrackingPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
         <div>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft size={16} />
+            {t('back')}
+          </Link>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('tracking')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">{t('trackingSub')}</p>
         </div>
