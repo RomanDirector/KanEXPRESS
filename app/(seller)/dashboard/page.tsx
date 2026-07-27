@@ -25,6 +25,8 @@ interface Order {
   lng: number | null
   photo_url: string | null
   created_at: string
+  dropped_at: string | null
+  accepted_at: string | null
 }
 
 const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React.ReactNode }> = {
@@ -388,6 +390,17 @@ export default function SellerDashboard() {
                         {STATUS_STYLE[order.status].icon}
                         {t(order.status)}
                       </span>
+                      {order.accepted_at ? (
+                        <span
+                          className="inline-block w-2 h-2 rounded-full bg-green-500 ml-2 align-middle"
+                          title={t('boxAcceptedLabel')}
+                        />
+                      ) : order.dropped_at ? (
+                        <span
+                          className="inline-block w-2 h-2 rounded-full bg-amber-400 ml-2 align-middle"
+                          title={t('boxDroppedLabel')}
+                        />
+                      ) : null}
                     </td>
                     <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
                     <td className="px-4 py-4">
