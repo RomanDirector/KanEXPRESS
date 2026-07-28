@@ -36,22 +36,41 @@ export default function LoginPage() {
 
     const userId = data.user.id
 
-    const { data: courier } = await supabase
+    // admins проверяется первой: если id случайно есть в нескольких таблицах
+    // одновременно, приоритет всегда у admin.
+    console.log('DEBUG: проверяю admins для id', userId)
+    const { data: admin, error: adminError } = await supabase
+      .from('admins')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle()
+    console.log('DEBUG: результат admins', admin, adminError)
+
+    if (admin) {
+      router.push('/admin')
+      return
+    }
+
+    console.log('DEBUG: проверяю couriers для id', userId)
+    const { data: courier, error: courierError } = await supabase
       .from('couriers')
       .select('id')
       .eq('id', userId)
       .maybeSingle()
+    console.log('DEBUG: результат couriers', courier, courierError)
 
     if (courier) {
       router.push('/courier-dashboard')
       return
     }
 
-    const { data: seller } = await supabase
+    console.log('DEBUG: проверяю sellers для id', userId)
+    const { data: seller, error: sellerError } = await supabase
       .from('sellers')
       .select('id')
       .eq('id', userId)
       .maybeSingle()
+    console.log('DEBUG: результат sellers', seller, sellerError)
 
     if (seller) {
       router.push('/dashboard')
@@ -63,7 +82,9 @@ export default function LoginPage() {
     // в couriers/sellers тогда не прошёл бы (не было сессии для RLS).
     // Черновик анкеты лежит в pending_registrations (не в localStorage) —
     // сработает даже если регистрировались с другого устройства.
+    console.log('DEBUG: проверяю pending_registrations для id', userId)
     const pending = await getPendingRegistration(supabase, userId)
+    console.log('DEBUG: результат pending_registrations', pending)
 
     if (!pending) {
       setLoading(false)

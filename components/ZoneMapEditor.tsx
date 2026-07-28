@@ -34,6 +34,22 @@ interface ZoneMeta {
   name: string;
 }
 
+export interface OrderPoint {
+  id: string;
+  order_number: string;
+  client_address: string;
+  lat: number;
+  lng: number;
+  status: string;
+}
+
+// Те же цвета статусов, что и на "Карте" (components/MapGL.tsx DEFAULT_STATUS_COLORS / orders-map).
+const ORDER_STATUS_COLORS: Record<string, string> = {
+  pending: '#F59E0B',
+  in_transit: '#3B82F6',
+  delivered: '#10B981',
+};
+
 function escapeHtml(s: string) {
   return s
     .replace(/&/g, '&amp;')
@@ -94,10 +110,11 @@ function cellToGeoJSON(cell: [number, number][]): GeoJSON.Polygon {
   return { type: 'Polygon', coordinates: [ring] };
 }
 
-export default function ZoneMapEditor() {
+export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }) {
   const mapRef = useRef<L.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
+  const orderLayerRef = useRef<L.LayerGroup | null>(null);
   const drawControlRef = useRef<any>(null);
   const polygonHandlerRef = useRef<any>(null);
   const sellerIdRef = useRef<string | null>(null);
@@ -283,9 +300,40 @@ export default function ZoneMapEditor() {
     return () => {
       map.remove();
       mapRef.current = null;
+      // Слой с точками заказов был привязан к этому экземпляру карты (StrictMode
+      // в dev монтирует эффект дважды) — без сброса следующий рендер добавлял бы
+      // маркеры в уже уничтоженный, отвязанный от карты layerGroup.
+      orderLayerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Точки заказов поверх зон — просто наложение, к рисованию/редактированию зон не относится.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!orderLayerRef.current) {
+      orderLayerRef.current = L.layerGroup().addTo(map);
+    } else {
+      orderLayerRef.current.clearLayers();
+    }
+
+    orders.forEach((order) => {
+      const color = ORDER_STATUS_COLORS[order.status] || '#EF4444';
+      const marker = L.circleMarker([order.lat, order.lng], {
+        radius: 8,
+        color: 'white',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 1,
+      });
+      marker.bindPopup(
+        `<div style="min-width:160px"><b>${escapeHtml(order.order_number)}</b><br/>${escapeHtml(order.client_address)}</div>`
+      );
+      orderLayerRef.current!.addLayer(marker);
+    });
+  }, [orders]);
 
   function attachZoneInteractions(layer: L.Polygon, zoneId: string, name: string) {
     layerMetaRef.current.set(L.Util.stamp(layer), { id: zoneId, name });

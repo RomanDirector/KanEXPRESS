@@ -1,51 +1,80 @@
-Перепиши components/ZoneMapEditor2GIS.tsx (переименуй в ZoneMapEditor.tsx, 
-без "2GIS" в названии) — сделай карту зон продавца ТОЧНО ТАКОЙ ЖЕ как карта 
-курьера: Leaflet + бесплатные OpenStreetMap тайлы, без каких-либо MapGL ключей.
+Нашёл настоящую причину — и она серьёзнее, чем просто баг с координатами. Функция assignZonesToOrders вообще не то делает: она ищет заказы с zone_id is null и в случае совпадения зоны пишет zone_id в заказ. А наша карта курьера фильтрует заказы по courier_name! То есть эта функция никогда не могла бы прокинуть заказ курьеру — она просто не с той колонкой работает, и courier_zones (кто из курьеров привязан к зоне) она вообще не читает.
 
-Установи (если ещё не стоят):
-npm install leaflet leaflet-draw react-leaflet
-npm install --save-dev @types/leaflet
+Скорее всего, orders.zone_id даже не существует как колонка (мы её никогда не создавали) — отсюда и молчаливые 0: update падает с ошибкой, updError не логируется, updated остаётся 0.
 
-Функционал (перенеси логику из уже рабочего компонента карты курьера, 
-плюс фичи ниже — они уже проверены и рабочие в отдельном HTML-инструменте, 
-переноси именно такую же логику):
+Переписываю assignZonesToOrders под реальную схему — с courier_zones и записью courier_name:
 
-1. L.map с TileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'), 
-   центр Алматы [43.238949, 76.889709], zoom 11
+typescript
+export async function assignZonesToOrders(): Promise<{ assigned: number; unassigned: number }> {
+  const zones = await loadZones()
+  if (zones.length === 0) return { assigned: 0, unassigned: 0 }
 
-2. L.Control.Draw — только polygon (остальные фигуры отключены: polyline, 
-   rectangle, circle, marker, circlemarker — false), edit с featureGroup и remove: true
+  const { data: courierZoneRows, error: czError } = await supabase
+    .from('courier_zones')
+    .select('zone_id, couriers(full_name)')
 
-3. Кнопка "✓ Завершить фигуру" — плавающая, появляется при начале рисования 
-   полигона (событие L.Draw.Event.DRAWSTART с layerType === 'polygon'), 
-   позволяет завершить контур одним кликом вместо попадания в первую точку. 
-   Скрывается по L.Draw.Event.DRAWSTOP. Минимум 3 точки перед завершением, 
-   иначе показать предупреждение.
+  if (czError) {
+    console.error('Ошибка загрузки courier_zones:', czError)
+    return { assigned: 0, unassigned: 0 }
+  }
 
-4. При создании полигона (L.Draw.Event.CREATED) — запрашивай название зоны 
-   (prompt), сохраняй в Supabase таблицу zones (seller_id = текущий продавец, 
-   name, coordinates как GeoJSON/latlngs)
+  const zoneToCouriers: Record<string, string[]> = {}
+  for (const row of courierZoneRows || []) {
+    const name = (row as any).couriers?.full_name
+    if (!name) continue
+    if (!zoneToCouriers[row.zone_id]) zoneToCouriers[row.zone_id] = []
+    zoneToCouriers[row.zone_id].push(name)
+  }
 
-5. Двойной клик по зоне — переименование (prompt с текущим именем, обновление 
-   в Supabase), с L.DomEvent.stop(e) чтобы не зумило карту
+  const { data: orders, error } = await supabase
+    .from('orders')
+    .select('id, lat, lng')
+    .is('courier_name', null)
+    .eq('status', 'pending')
+    .not('lat', 'is', null)
+    .not('lng', 'is', null)
 
-6. Кнопка удаления отдельной зоны — не только через edit-toolbar, но и явная 
-   кнопка/иконка при клике на зону
+  if (error || !orders) {
+    console.error('Ошибка загрузки заказов:', error)
+    return { assigned: 0, unassigned: 0 }
+  }
 
-7. Кнопка "🎯 Авторазметка зон" — генерирует стартовый шаблон сеткой N×N 
-   вокруг Алматы с "расшатанными" внутренними узлами решётки (jitterFactor 
-   ~0.35), чтобы форма зон была неровной как настоящие районы, а не идеальными 
-   квадратами. Соседние ячейки используют общие узлы решётки — без щелей 
-   и наложений между зонами. Спрашивает размер сетки (prompt, по умолчанию 4), 
-   предупреждает если уже есть зоны и подтверждает перед заменой.
+  let assigned = 0
+  let unassigned = 0
+  const roundRobinIndex: Record<string, number> = {}
 
-8. При загрузке страницы — подгружай сохранённые зоны продавца из Supabase 
-   (where seller_id = текущий продавец), отрисовывай как L.polygon с тем же 
-   набором взаимодействий (тултип названия, двойной клик на переименование)
+  for (const order of orders) {
+    const zone = pointInZone(order.lat, order.lng, zones)
+    const couriers = zone ? zoneToCouriers[zone.id] : undefined
 
-Обнови импорт в app/(seller)/delivery-zones/page.tsx на новое имя компонента.
+    if (zone && couriers && couriers.length > 0) {
+      const idx = (roundRobinIndex[zone.id] || 0) % couriers.length
+      roundRobinIndex[zone.id] = idx + 1
+      const { error: updError } = await supabase
+        .from('orders')
+        .update({ courier_name: couriers[idx] })
+        .eq('id', order.id)
+      if (updError) console.error('Ошибка обновления заказа', order.id, updError)
+      else assigned++
+    } else {
+      unassigned++
+    }
+  }
 
-Геокодер (если он где-то отдельно используется на этой странице для 
-определения адресов заказов) — оставь на 2GIS через уже существующую 
-инфраструктуру lib/geocode.ts и пул ключей geocode_api_keys, её не трогай, 
-она не связана с самой картой.
+  return { assigned, unassigned }
+}
+
+И в app/(seller)/zones/page.tsx поправь handleAssign, чтобы показывал оба числа:
+
+typescript
+async function handleAssign() {
+  setAssigning(true)
+  setResult(null)
+  const { assigned, unassigned } = await assignZonesToOrders()
+  setAssigning(false)
+  setResult(`Распределено: ${assigned}, не распределено: ${unassigned}`)
+}
+
+Дай агенту заменить assignZonesToOrders в lib/zones.ts целиком на это, поправить handleAssign, и заодно спроси его — есть ли в orders реально колонка zone_id (пусть проверит через information_schema), чтобы понимать, чинить старую логику или она изначально была нерабочей заглушкой.
+
+После замены — жми кнопку ещё раз, скинь результат.
