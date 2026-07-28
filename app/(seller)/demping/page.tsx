@@ -16,6 +16,9 @@ interface Rule {
   position: string | null;
   image_url: string | null;
   is_active: boolean;
+  competitor_price: number | null;
+  follow_competitor: boolean;
+  follow_step: number;
 }
 
 interface HistoryRow {
@@ -41,6 +44,9 @@ export default function DempingPage() {
   const [newMax, setNewMax] = useState('');
   const [newStep, setNewStep] = useState('');
   const [newPosition, setNewPosition] = useState('');
+  const [newCompetitorPrice, setNewCompetitorPrice] = useState('');
+  const [newFollowCompetitor, setNewFollowCompetitor] = useState(false);
+  const [newFollowStep, setNewFollowStep] = useState('1');
 
   useEffect(() => {
     loadAll();
@@ -52,7 +58,7 @@ export default function DempingPage() {
       supabase
         .from('demping_rules')
         .select(
-          'id, product_name, current_price, min_price, max_price, step, position, image_url, is_active'
+          'id, product_name, current_price, min_price, max_price, step, position, image_url, is_active, competitor_price, follow_competitor, follow_step'
         )
         .order('product_name'),
       supabase
@@ -80,6 +86,9 @@ export default function DempingPage() {
       step: Number(newStep),
       position: newPosition.trim() || null,
       is_active: true,
+      competitor_price: newCompetitorPrice ? Number(newCompetitorPrice) : null,
+      follow_competitor: newFollowCompetitor,
+      follow_step: newFollowStep ? Number(newFollowStep) : 1,
     });
     if (error) alert(t('errorPrefix') + error.message);
     else {
@@ -89,6 +98,9 @@ export default function DempingPage() {
       setNewMax('');
       setNewStep('');
       setNewPosition('');
+      setNewCompetitorPrice('');
+      setNewFollowCompetitor(false);
+      setNewFollowStep('1');
       loadAll();
     }
   }
@@ -126,6 +138,73 @@ export default function DempingPage() {
     });
     if (e2) console.error(e2);
 
+    loadAll();
+  }
+
+  // Если наша цена не ниже конкурента — подтягиваем её вниз на follow_step, но не ниже min_price.
+  async function recalcByCompetitor(rule: Rule) {
+    if (!rule.follow_competitor || rule.competitor_price == null) return;
+    if (rule.current_price < rule.competitor_price) return;
+
+    const newPriceVal = Math.max(rule.competitor_price - rule.follow_step, rule.min_price);
+    if (newPriceVal === rule.current_price) return;
+
+    const { error: e1 } = await supabase
+      .from('demping_rules')
+      .update({ current_price: newPriceVal })
+      .eq('id', rule.id);
+    if (e1) {
+      console.error(e1);
+      alert(t('errorPrefix') + e1.message);
+      return;
+    }
+
+    const { error: e2 } = await supabase.from('demping_history').insert({
+      rule_id: rule.id,
+      product_name: rule.product_name,
+      old_price: rule.current_price,
+      new_price: newPriceVal,
+      triggered_by: 'competitor_follow',
+    });
+    if (e2) console.error(e2);
+  }
+
+  async function recalcByCompetitorBtn(rule: Rule) {
+    await recalcByCompetitor(rule);
+    loadAll();
+  }
+
+  async function updateCompetitorPrice(rule: Rule, value: string) {
+    const num = value.trim() === '' ? null : Number(value);
+    const { error } = await supabase
+      .from('demping_rules')
+      .update({ competitor_price: num })
+      .eq('id', rule.id);
+    if (error) {
+      console.error(error);
+      alert(t('errorPrefix') + error.message);
+      return;
+    }
+    await recalcByCompetitor({ ...rule, competitor_price: num });
+    loadAll();
+  }
+
+  async function toggleFollowCompetitor(rule: Rule) {
+    const { error } = await supabase
+      .from('demping_rules')
+      .update({ follow_competitor: !rule.follow_competitor })
+      .eq('id', rule.id);
+    if (error) console.error(error);
+    loadAll();
+  }
+
+  async function updateFollowStep(rule: Rule, value: string) {
+    const num = Number(value) || 1;
+    const { error } = await supabase
+      .from('demping_rules')
+      .update({ follow_step: num })
+      .eq('id', rule.id);
+    if (error) console.error(error);
     loadAll();
   }
 
@@ -238,6 +317,35 @@ export default function DempingPage() {
                 placeholder={t('positionPlaceholder')}
               />
             </label>
+            <label className="text-sm">
+              <span className="block text-xs text-gray-500">{t('competitorPriceLabel')}</span>
+              <input
+                type="number"
+                value={newCompetitorPrice}
+                onChange={(e) => setNewCompetitorPrice(e.target.value)}
+                className="border rounded px-2 py-1.5 w-32"
+              />
+            </label>
+            <label className="text-sm flex items-center gap-2 pb-1.5">
+              <input
+                type="checkbox"
+                checked={newFollowCompetitor}
+                onChange={(e) => setNewFollowCompetitor(e.target.checked)}
+                className="w-4 h-4 accent-blue-600"
+              />
+              <span className="text-xs text-gray-500">{t('followCompetitorLabel')}</span>
+            </label>
+            {newFollowCompetitor && (
+              <label className="text-sm">
+                <span className="block text-xs text-gray-500">{t('followStepLabel')}</span>
+                <input
+                  type="number"
+                  value={newFollowStep}
+                  onChange={(e) => setNewFollowStep(e.target.value)}
+                  className="border rounded px-2 py-1.5 w-24"
+                />
+              </label>
+            )}
             <button
               onClick={addRule}
               className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold"
@@ -256,6 +364,9 @@ export default function DempingPage() {
                   <th className="p-3">{t('minPriceHeader')}</th>
                   <th className="p-3">{t('maxPriceHeader')}</th>
                   <th className="p-3">{t('positionHeader')}</th>
+                  <th className="p-3">{t('competitorPriceHeader')}</th>
+                  <th className="p-3">{t('followCompetitorHeader')}</th>
+                  <th className="p-3">{t('followStepHeader')}</th>
                   <th className="p-3">{t('dempingHeader')}</th>
                   <th className="p-3">{t('status')}</th>
                   <th className="p-3">{t('actionsHeader')}</th>
@@ -264,14 +375,14 @@ export default function DempingPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={9} className="p-6 text-center text-gray-500">
+                    <td colSpan={12} className="p-6 text-center text-gray-500">
                       {t('loading')}
                     </td>
                   </tr>
                 )}
                 {!loading && rules.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="p-6 text-center text-gray-500">
+                    <td colSpan={12} className="p-6 text-center text-gray-500">
                       {t('noRules')}
                     </td>
                   </tr>
@@ -299,6 +410,38 @@ export default function DempingPage() {
                       <td className="p-3">{r.min_price.toLocaleString('ru-RU')} ₸</td>
                       <td className="p-3">{r.max_price.toLocaleString('ru-RU')} ₸</td>
                       <td className="p-3">{r.position || '—'}</td>
+                      <td className="p-3">
+                        <input
+                          type="number"
+                          defaultValue={r.competitor_price ?? ''}
+                          onBlur={(e) => updateCompetitorPrice(r, e.target.value)}
+                          className="border rounded px-2 py-1 w-28"
+                        />
+                      </td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => toggleFollowCompetitor(r)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            r.follow_competitor
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {r.follow_competitor ? t('on') : t('off')}
+                        </button>
+                      </td>
+                      <td className="p-3">
+                        {r.follow_competitor ? (
+                          <input
+                            type="number"
+                            defaultValue={r.follow_step ?? 1}
+                            onBlur={(e) => updateFollowStep(r, e.target.value)}
+                            className="border rounded px-2 py-1 w-20"
+                          />
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="p-3">
                         <button
                           onClick={() => toggleActive(r)}
@@ -329,6 +472,13 @@ export default function DempingPage() {
                           className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
                         >
                           {t('decreaseStepBtn')}
+                        </button>
+                        <button
+                          onClick={() => recalcByCompetitorBtn(r)}
+                          disabled={!r.follow_competitor || r.competitor_price == null}
+                          className="px-3 py-1 rounded bg-purple-600 text-white text-xs font-semibold disabled:opacity-40"
+                        >
+                          {t('recalcByCompetitorBtn')}
                         </button>
                         <button
                           onClick={() => deleteRule(r)}
@@ -374,7 +524,11 @@ export default function DempingPage() {
                     {h.new_price.toLocaleString('ru-RU')} ₸
                   </td>
                   <td className="p-3">
-                    {h.triggered_by === 'auto' ? t('autoLabel') : t('manualLabel')}
+                    {h.triggered_by === 'auto'
+                      ? t('autoLabel')
+                      : h.triggered_by === 'competitor_follow'
+                      ? t('competitorFollowLabel')
+                      : t('manualLabel')}
                   </td>
                   <td className="p-3 text-gray-500">
                     {new Date(h.created_at).toLocaleString('ru-RU')}

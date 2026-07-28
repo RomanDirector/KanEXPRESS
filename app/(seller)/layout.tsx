@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
@@ -19,6 +19,8 @@ function Sidebar() {
     { href: '/invoices',        label: t('invoices'),      icon: FileText },
     { href: '/orders-map',      label: t('map'),           icon: Map },
     { href: '/delivery-zones',  label: t('deliveryZones'), icon: MapPinned },
+    { href: '/boxes',           label: t('boxesNav'),      icon: Box },
+    { href: '/scan',            label: t('scanNav'),       icon: ScanLine },
     { href: '/tracking',        label: t('tracking'),      icon: Navigation },
     { href: '/demping',         label: t('demping'),       icon: TrendingDown },
     { href: '/stats',           label: t('stats'),         icon: BarChart2 },
