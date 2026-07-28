@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useLang } from '@/lib/i18n'
+import { Toast } from '@/components/Toast'
 
 function MapLoading() {
   const { t } = useLang()
@@ -27,17 +28,21 @@ export default function TrackingPage() {
   const [tab, setTab] = useState<'list' | 'map'>('map')
   const [couriers, setCouriers] = useState<CourierWithOrders[]>([])
   const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   useEffect(() => { loadList() }, [])
 
   async function loadList() {
     setLoading(true)
     const { data: courierRows, error: courierErr } = await supabase.from('couriers').select('id, full_name, phone')
-    if (courierErr) console.error(courierErr)
     const { data: orderRows, error: orderErr } = await supabase
       .from('orders').select('id, order_number, client_address, courier_name, status')
       .eq('status', 'in_transit')
-    if (orderErr) console.error(orderErr)
+    if (courierErr || orderErr) {
+      if (courierErr) console.error(courierErr)
+      if (orderErr) console.error(orderErr)
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+    }
 
     const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({
       id: c.id, full_name: c.full_name, phone: c.phone,
@@ -99,6 +104,8 @@ export default function TrackingPage() {
           </div>
         )}
       </main>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

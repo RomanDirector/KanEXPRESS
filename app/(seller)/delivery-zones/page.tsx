@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { assignZonesToOrders, loadZones } from '@/lib/zones'
 import { useLang } from '@/lib/i18n'
+import { Toast } from '@/components/Toast'
 
 function MapLoading() {
   return <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты…</div>
@@ -21,9 +22,15 @@ export default function DeliveryZonesPage() {
   const [assigning, setAssigning] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [zoneCount, setZoneCount] = useState<number | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   useEffect(() => {
-    loadZones().then((zones) => setZoneCount(zones.length))
+    loadZones()
+      .then((zones) => setZoneCount(zones.length))
+      .catch((error) => {
+        console.error(error)
+        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      })
   }, [])
 
   async function handleAssign() {
@@ -66,6 +73,8 @@ export default function DeliveryZonesPage() {
         </div>
       </div>
       <ZoneMapEditor />
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

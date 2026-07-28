@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 import * as XLSX from 'xlsx';
+import { Toast } from '@/components/Toast';
 
 interface ArchOrder {
   id: string;
@@ -33,6 +34,7 @@ export default function ArchivePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'shipped' | 'not_shipped'>('all');
   const [photoOrder, setPhotoOrder] = useState<ArchOrder | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
 
   useEffect(() => {
     load();
@@ -48,7 +50,10 @@ export default function ArchivePage() {
       )
       .eq('status', status)
       .order('created_at', { ascending: false });
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+    }
     setOrders((data || []) as ArchOrder[]);
     setLoading(false);
   }
@@ -128,7 +133,12 @@ export default function ArchivePage() {
       .from('orders')
       .update({ photo_url: pub.publicUrl })
       .eq('id', photoOrder.id);
-    if (updateError) console.error(updateError);
+    if (updateError) {
+      console.error(updateError);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    } else {
+      setToast({ message: 'Фото успешно загружено', type: 'success' });
+    }
     setUploading(false);
     setPhotoOrder(null);
     load();
@@ -302,6 +312,8 @@ export default function ArchivePage() {
           </div>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }

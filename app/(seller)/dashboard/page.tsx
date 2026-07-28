@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic'
 import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates'
+import { Toast } from '@/components/Toast'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -46,6 +47,7 @@ export default function SellerDashboard() {
   const [distributing, setDistributing] = useState(false)
   const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   async function refreshOrders() {
     setLoading(true)
@@ -53,8 +55,10 @@ export default function SellerDashboard() {
       .from('orders')
       .select('*')
       .order('created_at', { ascending: false })
-    if (error) console.error(error.message)
-    else setOrders(data as Order[])
+    if (error) {
+      console.error(error.message)
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+    } else setOrders(data as Order[])
     setLoading(false)
   }
 
@@ -65,8 +69,10 @@ export default function SellerDashboard() {
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
-      if (error) console.error(error.message)
-      else setOrders(data as Order[])
+      if (error) {
+        console.error(error.message)
+        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      } else setOrders(data as Order[])
       setLoading(false)
     }
     fetchOrders()
@@ -104,7 +110,12 @@ export default function SellerDashboard() {
   const massSetStatus = async (status: OrderStatus) => {
     if (selected.size === 0) return
     const { error } = await supabase.from('orders').update({ status }).in('id', Array.from(selected))
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
+    } else {
+      setToast({ message: 'Статус успешно обновлён', type: 'success' })
+    }
     setSelected(new Set())
   }
 
@@ -136,7 +147,10 @@ export default function SellerDashboard() {
       .from('couriers')
       .select('*')
       .eq('status', 'active')
-    if (couriersError) console.error(couriersError)
+    if (couriersError) {
+      console.error(couriersError)
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+    }
 
     if (!couriersData || couriersData.length === 0) {
       alert('Нет активных курьеров!')
@@ -144,14 +158,19 @@ export default function SellerDashboard() {
       return
     }
 
+    let hadError = false
     for (let i = 0; i < pendingOrders.length; i++) {
       const courier = couriersData[i % couriersData.length]
       const { error } = await supabase
         .from('orders')
         .update({ courier_name: courier.full_name, status: 'in_transit' })
         .eq('id', pendingOrders[i].id)
-      if (error) console.error(error)
+      if (error) {
+        console.error(error)
+        hadError = true
+      }
     }
+    if (hadError) setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
 
     setDistributing(false)
     window.location.reload()
@@ -205,7 +224,12 @@ export default function SellerDashboard() {
       .from('orders')
       .update({ photo_url: pub.publicUrl })
       .eq('id', photoOrder.id)
-    if (updateError) console.error(updateError)
+    if (updateError) {
+      console.error(updateError)
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
+    } else {
+      setToast({ message: 'Фото успешно загружено', type: 'success' })
+    }
 
     setUploading(false)
     setPhotoOrder(null)
@@ -483,6 +507,8 @@ export default function SellerDashboard() {
           </div>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

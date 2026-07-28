@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 import { loadZones, type Zone } from '@/lib/zones';
+import { Toast } from '@/components/Toast';
 
 interface Box {
   id: string;
@@ -35,6 +36,7 @@ export default function BoxesPage() {
 
   const [qrBox, setQrBox] = useState<Box | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -49,7 +51,10 @@ export default function BoxesPage() {
         .order('label'),
       loadZones(),
     ]);
-    if (bErr) console.error(bErr);
+    if (bErr) {
+      console.error(bErr);
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+    }
     setBoxes((b || []) as unknown as Box[]);
     setZones(z);
     setLoading(false);
@@ -71,13 +76,18 @@ export default function BoxesPage() {
     setNewLabel('');
     setNewZoneId('');
     setShowAddForm(false);
+    setToast({ message: 'Бокс успешно добавлен', type: 'success' });
     loadAll();
   }
 
   async function deleteBox(box: Box) {
     if (!confirm(t('deleteBoxConfirm').replace('{name}', box.label))) return;
     const { error } = await supabase.from('delivery_boxes').delete().eq('id', box.id);
-    if (error) alert(t('errorPrefix') + error.message);
+    if (error) {
+      alert(t('errorPrefix') + error.message);
+    } else {
+      setToast({ message: 'Бокс успешно удалён', type: 'success' });
+    }
     loadAll();
   }
 
@@ -89,6 +99,7 @@ export default function BoxesPage() {
       setQrDataUrl(dataUrl);
     } catch (e) {
       console.error(e);
+      setToast({ message: 'Не удалось сгенерировать QR-код', type: 'error' });
     }
   }
 
@@ -243,6 +254,8 @@ export default function BoxesPage() {
           </div>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }

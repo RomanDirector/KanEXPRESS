@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { LogOut, Crown, Check, Pencil, ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { Toast } from '@/components/Toast'
 
 interface SellerData {
   full_name: string
@@ -79,6 +80,12 @@ export default function ProfilePage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [upgrading, setUpgrading] = useState(false)
+  const [upgradeSuccess, setUpgradeSuccess] = useState(false)
+
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+
   useEffect(() => {
     load()
   }, [])
@@ -118,9 +125,12 @@ export default function ProfilePage() {
         .order('created_at', { ascending: false }),
     ])
 
-    if (sellerErr) console.error(sellerErr)
-    if (subErr) console.error(subErr)
-    if (paymentsErr) console.error(paymentsErr)
+    if (sellerErr || subErr || paymentsErr) {
+      if (sellerErr) console.error(sellerErr)
+      if (subErr) console.error(subErr)
+      if (paymentsErr) console.error(paymentsErr)
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+    }
 
     setSeller(sellerData as SellerData)
     setSubscription({
@@ -164,6 +174,7 @@ export default function ProfilePage() {
     }
     setSeller((prev) => (prev ? { ...prev, ...editForm } : prev))
     setIsEditing(false)
+    setToast({ message: 'Изменения успешно сохранены', type: 'success' })
   }
 
   async function cancelSubscription() {
@@ -180,6 +191,8 @@ export default function ProfilePage() {
       console.error(error)
       alert('Ошибка отмены подписки: ' + error.message)
       setSubscription((prev) => ({ ...prev, cancel_at_period_end: false }))
+    } else {
+      setToast({ message: 'Подписка отменена', type: 'success' })
     }
   }
 
@@ -194,6 +207,8 @@ export default function ProfilePage() {
       console.error(error)
       alert('Ошибка возобновления подписки: ' + error.message)
       setSubscription((prev) => ({ ...prev, cancel_at_period_end: true }))
+    } else {
+      setToast({ message: 'Подписка возобновлена', type: 'success' })
     }
   }
 
@@ -204,6 +219,7 @@ export default function ProfilePage() {
     const { error } = await supabase.from('sellers').update({ notifications_enabled: next }).eq('id', userId)
     if (error) {
       console.error(error)
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
       setSeller((prev) => (prev ? { ...prev, notifications_enabled: !next } : prev))
     }
   }
@@ -229,6 +245,42 @@ export default function ProfilePage() {
     setPasswordMsg({ type: 'success', text: 'Пароль успешно изменён' })
     setNewPassword('')
     setConfirmPassword('')
+  }
+
+  async function handleUpgradeConfirm() {
+    if (!userId) return
+    setUpgrading(true)
+    // TODO: заменить на реальную интеграцию Kaspi Pay API когда будет готова
+    const { error } = await supabase.rpc('upgrade_to_pro', { p_seller_id: userId, p_amount: 10000 })
+    setUpgrading(false)
+    if (error) {
+      console.error(error)
+      alert('Ошибка оплаты: ' + error.message)
+      return
+    }
+
+    const [{ data: subData }, { data: paymentsData }] = await Promise.all([
+      supabase
+        .from('seller_subscriptions')
+        .select('plan, expires_at, cancel_at_period_end')
+        .eq('seller_id', userId)
+        .maybeSingle(),
+      supabase
+        .from('payment_history')
+        .select('*')
+        .eq('seller_id', userId)
+        .order('created_at', { ascending: false }),
+    ])
+
+    setSubscription({
+      plan: subData?.plan === 'pro' ? 'pro' : 'free',
+      expires_at: subData?.expires_at ?? null,
+      cancel_at_period_end: subData?.cancel_at_period_end ?? false,
+    })
+    setPayments((paymentsData || []) as PaymentRow[])
+    setShowUpgradeModal(false)
+    setUpgradeSuccess(true)
+    setTimeout(() => setUpgradeSuccess(false), 4000)
   }
 
   function confirmDeleteAccount() {
@@ -371,9 +423,15 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          {upgradeSuccess && (
+            <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 mb-4">
+              Подписка Pro активирована!
+            </div>
+          )}
+
           {subscription.plan === 'free' && (
             <button
-              onClick={() => alert('Скоро будет доступно')}
+              onClick={() => setShowUpgradeModal(true)}
               className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
             >
               Улучшить до Pro
@@ -565,6 +623,42 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {showUpgradeModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setShowUpgradeModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold mb-2 text-gray-900">Улучшить до Pro</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Оплата подписки Pro — 10 000 ₸/мес. Переведите сумму на Kaspi по номеру +7 XXX XXX XX XX с комментарием
+              вашим email, затем нажмите «Я оплатил».
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleUpgradeConfirm}
+                disabled={upgrading}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
+              >
+                {upgrading ? 'Проверяю…' : 'Я оплатил'}
+              </button>
+              <button
+                onClick={() => setShowUpgradeModal(false)}
+                disabled={upgrading}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

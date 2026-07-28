@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
+import { checkLimit } from '@/lib/limits';
+import { Toast } from '@/components/Toast';
 
 interface Rule {
   id: string;
@@ -37,6 +39,7 @@ export default function DempingPage() {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCronInfo, setShowCronInfo] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
 
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
@@ -67,7 +70,10 @@ export default function DempingPage() {
         .order('created_at', { ascending: false })
         .limit(200),
     ]);
-    if (rErr) console.error(rErr);
+    if (rErr) {
+      console.error(rErr);
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+    }
     if (hErr) console.error(hErr);
     setRules((r || []) as Rule[]);
     setHistory((h || []) as HistoryRow[]);
@@ -77,8 +83,17 @@ export default function DempingPage() {
   async function addRule() {
     if (!newName.trim() || !newPrice || !newMin || !newMax || !newStep) return;
     const { data: userData } = await supabase.auth.getUser();
+    const sellerId = userData?.user?.id;
+    if (!sellerId) return;
+
+    const { allowed, max } = await checkLimit(sellerId, 'demping_rules');
+    if (!allowed) {
+      alert(`Достигнут лимит ${max} товаров на плане Free. Улучшите план на странице Профиль.`);
+      return;
+    }
+
     const { error } = await supabase.from('demping_rules').insert({
-      seller_id: userData?.user?.id,
+      seller_id: sellerId,
       product_name: newName.trim(),
       current_price: Number(newPrice),
       min_price: Number(newMin),
@@ -101,6 +116,7 @@ export default function DempingPage() {
       setNewCompetitorPrice('');
       setNewFollowCompetitor(false);
       setNewFollowStep('1');
+      setToast({ message: 'Товар успешно добавлен', type: 'success' });
       loadAll();
     }
   }
@@ -110,7 +126,10 @@ export default function DempingPage() {
       .from('demping_rules')
       .update({ is_active: !rule.is_active })
       .eq('id', rule.id);
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    }
     loadAll();
   }
 
@@ -136,7 +155,10 @@ export default function DempingPage() {
       new_price: newPriceVal,
       triggered_by: 'manual',
     });
-    if (e2) console.error(e2);
+    if (e2) {
+      console.error(e2);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    }
 
     loadAll();
   }
@@ -166,7 +188,10 @@ export default function DempingPage() {
       new_price: newPriceVal,
       triggered_by: 'competitor_follow',
     });
-    if (e2) console.error(e2);
+    if (e2) {
+      console.error(e2);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    }
   }
 
   async function recalcByCompetitorBtn(rule: Rule) {
@@ -194,7 +219,10 @@ export default function DempingPage() {
       .from('demping_rules')
       .update({ follow_competitor: !rule.follow_competitor })
       .eq('id', rule.id);
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    }
     loadAll();
   }
 
@@ -204,14 +232,22 @@ export default function DempingPage() {
       .from('demping_rules')
       .update({ follow_step: num })
       .eq('id', rule.id);
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    }
     loadAll();
   }
 
   async function deleteRule(rule: Rule) {
     if (!confirm(t('deleteRuleConfirm').replace('{name}', rule.product_name))) return;
     const { error } = await supabase.from('demping_rules').delete().eq('id', rule.id);
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    } else {
+      setToast({ message: 'Товар успешно удалён', type: 'success' });
+    }
     loadAll();
   }
 
@@ -580,6 +616,8 @@ export default function DempingPage() {
           </div>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }

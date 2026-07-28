@@ -6,6 +6,7 @@ import { ArrowLeft, Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
 import type { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
+import { Toast } from '@/components/Toast';
 
 type Mode = 'drop' | 'pickup';
 
@@ -38,6 +39,7 @@ export default function ScanPage() {
   const [resultOrder, setResultOrder] = useState<OrderRow | null>(null);
   const [resultBox, setResultBox] = useState<BoxRow | null>(null);
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
@@ -111,7 +113,10 @@ export default function ScanPage() {
       .eq('order_number', orderNumber)
       .maybeSingle();
 
-    if (error) console.error(error);
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+    }
 
     if (!order) {
       setErrorMsg(t('orderNotFoundError'));
@@ -131,7 +136,10 @@ export default function ScanPage() {
         .eq('zone_id', orderRow.zone_id)
         .limit(1)
         .maybeSingle();
-      if (boxErr) console.error(boxErr);
+      if (boxErr) {
+        console.error(boxErr);
+        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      }
       if (!box) {
         setErrorMsg(t('boxNotFoundForZoneError'));
         return;
@@ -155,7 +163,10 @@ export default function ScanPage() {
           .select('id, code, label')
           .eq('id', orderRow.box_id)
           .maybeSingle();
-        if (boxErr) console.error(boxErr);
+        if (boxErr) {
+          console.error(boxErr);
+          setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+        }
         box = b as BoxRow | null;
       }
       setResultOrder(orderRow);
@@ -331,6 +342,8 @@ export default function ScanPage() {
           <p className="text-lg font-bold text-gray-600">{t('alreadyAcceptedLabel')}</p>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }

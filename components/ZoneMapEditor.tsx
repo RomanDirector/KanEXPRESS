@@ -6,6 +6,8 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import 'leaflet-draw';
 import { supabase } from '@/lib/supabase';
+import { checkLimit } from '@/lib/limits';
+import { Toast } from '@/components/Toast';
 
 const ALMATY_CENTER: [number, number] = [43.238949, 76.889709];
 const DEFAULT_ZOOM = 11;
@@ -107,6 +109,7 @@ export default function ZoneMapEditor() {
   const [zonesCount, setZonesCountState] = useState(0);
   const [showFinishBtn, setShowFinishBtn] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
 
   function setZonesCount(updater: (c: number) => number) {
     zonesCountRef.current = updater(zonesCountRef.current);
@@ -201,6 +204,12 @@ export default function ZoneMapEditor() {
         return;
       }
 
+      const { allowed, max } = await checkLimit(sellerId, 'zones');
+      if (!allowed) {
+        alert(`Достигнут лимит ${max} зон на плане Free. Улучшите план на странице Профиль.`);
+        return;
+      }
+
       const geojson = (layer.toGeoJSON() as any).geometry;
       const color = PALETTE[zonesCountRef.current % PALETTE.length];
 
@@ -226,6 +235,7 @@ export default function ZoneMapEditor() {
       zoneLayersRef.current.set(data.id, layer);
       attachZoneInteractions(layer, data.id, trimmed);
       setZonesCount((c) => c + 1);
+      setToast({ message: 'Зона успешно сохранена', type: 'success' });
     });
 
     map.on((L as any).Draw.Event.EDITED, (e: any) => {
@@ -342,6 +352,7 @@ export default function ZoneMapEditor() {
 
     if (error) {
       console.error('Ошибка загрузки зон:', error);
+      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
       return;
     }
 
@@ -426,6 +437,7 @@ export default function ZoneMapEditor() {
     }
 
     const cells = buildGridCells(n);
+    let hadError = false;
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
       const name = `Зона ${i + 1}`;
@@ -440,6 +452,7 @@ export default function ZoneMapEditor() {
 
       if (error || !data) {
         console.error('Ошибка сохранения зоны сетки:', error);
+        hadError = true;
         continue;
       }
 
@@ -450,6 +463,11 @@ export default function ZoneMapEditor() {
     }
 
     setZonesCount(() => cells.length);
+    if (hadError) {
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+    } else {
+      setToast({ message: 'Зоны успешно созданы', type: 'success' });
+    }
   }
 
   return (
@@ -484,6 +502,8 @@ export default function ZoneMapEditor() {
       <div className="absolute bottom-4 left-3 z-[1000] bg-white rounded-xl shadow-lg px-3 py-2 text-xs text-gray-500">
         Зон сохранено: {zonesCount}
       </div>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
 }
