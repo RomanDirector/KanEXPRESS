@@ -85,6 +85,53 @@ export default function CourierDashboardPage() {
   const [cancelComment, setCancelComment] = useState('')
   const [cancelError, setCancelError] = useState('')
   const [cancelSubmitting, setCancelSubmitting] = useState(false)
+  const [locationError, setLocationError] = useState('')
+
+  const hasDepartedOrder = orders.some((o) => o.courier_stage === 'departed')
+
+  useEffect(() => {
+    if (!hasDepartedOrder) return
+
+    if (!('geolocation' in navigator)) {
+      setLocationError('Геолокация не поддерживается вашим браузером')
+      return
+    }
+
+    let lastSentAt = 0
+    const THROTTLE_MS = 12_000
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const now = Date.now()
+        if (now - lastSentAt < THROTTLE_MS) return
+        lastSentAt = now
+
+        supabase
+          .from('couriers')
+          .update({
+            current_lat: position.coords.latitude,
+            current_lng: position.coords.longitude,
+            location_updated_at: new Date().toISOString(),
+          })
+          .eq('id', courier.id)
+          .then(({ error }) => {
+            if (error) console.error(error.message)
+          })
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationError('Доступ к геолокации запрещён. Включите его в настройках браузера, чтобы клиенты видели ваше местоположение.')
+        } else {
+          setLocationError('Не удалось определить местоположение')
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 10_000 },
+    )
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId)
+    }
+  }, [supabase, courier.id, hasDepartedOrder])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -369,6 +416,12 @@ export default function CourierDashboardPage() {
       </header>
 
       <main className="px-6 py-6 max-w-5xl mx-auto space-y-6">
+        {locationError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {locationError}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card className="rounded-2xl">
             <CardHeader className="pb-2">

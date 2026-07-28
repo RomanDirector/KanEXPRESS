@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { assignZonesToOrders, loadZones } from '@/lib/zones'
+import { supabase } from '@/lib/supabase'
 import { useLang } from '@/lib/i18n'
+import type { OrderPoint } from '@/components/ZoneMapEditor'
 
 function MapLoading() {
   return <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты…</div>
@@ -21,17 +23,41 @@ export default function DeliveryZonesPage() {
   const [assigning, setAssigning] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [zoneCount, setZoneCount] = useState<number | null>(null)
+  const [orders, setOrders] = useState<OrderPoint[]>([])
 
   useEffect(() => {
     loadZones().then((zones) => setZoneCount(zones.length))
   }, [])
 
+  // Заказы поверх зон — тот же запрос без фильтра по продавцу, что и на /orders-map.
+  useEffect(() => {
+    const fetchOrders = async () => {
+      const { data, error } = await supabase.from('orders').select('*')
+      if (error) {
+        console.error(error.message)
+        return
+      }
+      const points = (data || [])
+        .filter((o: any) => o.lat != null && o.lng != null)
+        .map((o: any) => ({
+          id: o.id,
+          order_number: o.order_number,
+          client_address: o.client_address,
+          lat: o.lat,
+          lng: o.lng,
+          status: o.status,
+        }))
+      setOrders(points)
+    }
+    fetchOrders()
+  }, [])
+
   async function handleAssign() {
     setAssigning(true)
     setResult(null)
-    const count = await assignZonesToOrders()
+    const { assigned, unassigned } = await assignZonesToOrders()
     setAssigning(false)
-    setResult(t('zonesAssignResult').replace('{count}', String(count)))
+    setResult(`Распределено: ${assigned}, не распределено: ${unassigned}`)
   }
 
   const noZones = zoneCount === 0
@@ -65,7 +91,7 @@ export default function DeliveryZonesPage() {
           </button>
         </div>
       </div>
-      <ZoneMapEditor />
+      <ZoneMapEditor orders={orders} />
     </div>
   )
 }

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase'
 import { useCourier } from '@/lib/courier-context'
-import type { MapPoint } from '@/components/MapGL'
+import type { MapPoint, MapZone } from '@/components/MapGL'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -63,6 +63,7 @@ export default function CourierMapPage() {
   const supabase = useMemo(() => createClient(), [])
   const courier = useCourier()
   const [orders, setOrders] = useState<Order[]>([])
+  const [zones, setZones] = useState<MapZone[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<CourierStage | 'all'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -84,6 +85,16 @@ export default function CourierMapPage() {
 
     fetchOrders()
 
+    const fetchZones = async () => {
+      const { data: zoneLinks } = await supabase
+        .from('courier_zones')
+        .select('zones(id, name, color, coordinates)')
+        .eq('courier_id', courier.id)
+      setZones((zoneLinks || []).map((row: any) => row.zones).filter(Boolean))
+    }
+
+    fetchZones()
+
     const channel = supabase
       .channel('courier-map-orders-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchOrders)
@@ -92,7 +103,7 @@ export default function CourierMapPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, courier.full_name])
+  }, [supabase, courier.id, courier.full_name])
 
   const filteredOrders = filter === 'all' ? orders : orders.filter((o) => o.courier_stage === filter)
 
@@ -217,6 +228,7 @@ export default function CourierMapPage() {
               <div className="relative">
                 <MapGL
                   points={points}
+                  zones={zones}
                   height="600px"
                   statusColors={STAGE_MARKER_COLORS}
                   selectedId={selectedId}

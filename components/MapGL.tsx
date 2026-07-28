@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -16,8 +16,16 @@ export interface MapPoint {
   price: number
 }
 
+export interface MapZone {
+  id: string
+  name: string
+  color: string
+  coordinates: { type: string; coordinates: number[][][] }
+}
+
 export interface MapGLProps {
   points: MapPoint[]
+  zones?: MapZone[]
   center?: [number, number]
   zoom?: number
   height?: string
@@ -93,6 +101,7 @@ function buildMarkerIcon(color: string, selected: boolean) {
 
 export function MapGL({
   points,
+  zones,
   center = [43.238949, 76.889709],
   zoom = 12,
   height = '500px',
@@ -115,6 +124,21 @@ export function MapGL({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; OpenStreetMap contributors'
         />
+
+        {zones?.map((zone) => {
+          const positions = zone.coordinates.coordinates[0].map(
+            ([lng, lat]) => [lat, lng] as [number, number]
+          )
+          return (
+            <Polygon
+              key={zone.id}
+              positions={positions}
+              pathOptions={{ color: zone.color, fillColor: zone.color, fillOpacity: 0.15, weight: 2 }}
+            >
+              <Popup>{zone.name}</Popup>
+            </Polygon>
+          )
+        })}
 
         {validPoints.map((point) => {
           const isSelected = point.id === selectedId
