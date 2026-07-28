@@ -10,18 +10,20 @@ import { Toast } from '@/components/Toast';
 
 interface ArchOrder {
   id: string;
-  number: string;
-  shipped: boolean;
+  order_number: string;
   comment: string | null;
   client_phone: string;
   client_address: string;
   status: string;
   photo_url: string | null;
-  delivered_at: string | null;
   created_at: string;
 }
 
 type Tab = 'delivered' | 'old';
+
+function isShipped(order: ArchOrder) {
+  return order.status === 'in_transit' || order.status === 'delivered';
+}
 
 export default function ArchivePage() {
   const { t } = useLang();
@@ -46,13 +48,13 @@ export default function ArchivePage() {
     const { data, error } = await supabase
       .from('orders')
       .select(
-        'id, number, shipped, comment, client_phone, client_address, status, photo_url, delivered_at, created_at'
+        'id, order_number, comment, client_phone, client_address, status, photo_url, created_at'
       )
       .eq('status', status)
       .order('created_at', { ascending: false });
     if (error) {
-      console.error(error);
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      console.error('archive load failed:', error);
+      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
     }
     setOrders((data || []) as ArchOrder[]);
     setLoading(false);
@@ -65,7 +67,7 @@ export default function ArchivePage() {
     if (q) {
       list = list.filter(
         (o) =>
-          o.number.toLowerCase().includes(q) ||
+          o.order_number.toLowerCase().includes(q) ||
           o.client_phone.toLowerCase().includes(q) ||
           o.client_address.toLowerCase().includes(q)
       );
@@ -73,35 +75,31 @@ export default function ArchivePage() {
 
     if (dateFrom) {
       const from = new Date(dateFrom).getTime();
-      list = list.filter(
-        (o) => new Date(o.delivered_at || o.created_at).getTime() >= from
-      );
+      list = list.filter((o) => new Date(o.created_at).getTime() >= from);
     }
     if (dateTo) {
       const to = new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1;
-      list = list.filter(
-        (o) => new Date(o.delivered_at || o.created_at).getTime() <= to
-      );
+      list = list.filter((o) => new Date(o.created_at).getTime() <= to);
     }
 
-    if (statusFilter === 'shipped') list = list.filter((o) => o.shipped);
-    if (statusFilter === 'not_shipped') list = list.filter((o) => !o.shipped);
+    if (statusFilter === 'shipped') list = list.filter((o) => isShipped(o));
+    if (statusFilter === 'not_shipped') list = list.filter((o) => !isShipped(o));
 
     return list;
   }, [orders, search, dateFrom, dateTo, statusFilter]);
 
-  const shippedCount = filtered.filter((o) => o.shipped).length;
+  const shippedCount = filtered.filter((o) => isShipped(o)).length;
   const deliveredCount = filtered.filter((o) => o.status === 'delivered').length;
 
   function exportExcel() {
     const rows = filtered.map((o) => ({
-      [t('numberCol')]: o.number,
-      [t('shipmentHeader')]: o.shipped ? t('shippedLabel') : t('notShippedLabel'),
+      [t('numberCol')]: o.order_number,
+      [t('shipmentHeader')]: isShipped(o) ? t('shippedLabel') : t('notShippedLabel'),
       [t('comment')]: o.comment || t('notSpecified'),
       [t('clientPhoneHeader')]: o.client_phone,
       [t('clientAddressHeader')]: o.client_address,
       [t('orderStatusHeader')]: o.status === 'delivered' ? t('issuedLabel') : t('archive'),
-      [t('dateCol')]: o.delivered_at || o.created_at,
+      [t('dateCol')]: o.created_at,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -253,8 +251,8 @@ export default function ArchivePage() {
             )}
             {filtered.map((o) => (
               <tr key={o.id} className="border-b hover:bg-gray-50">
-                <td className="p-3 text-blue-600 font-semibold">{o.number}</td>
-                <td className="p-3">{o.shipped ? t('shippedLabel') : t('notShippedLabel')}</td>
+                <td className="p-3 text-blue-600 font-semibold">{o.order_number}</td>
+                <td className="p-3">{isShipped(o) ? t('shippedLabel') : t('notShippedLabel')}</td>
                 <td className="p-3 text-gray-400">{o.comment || t('notSpecified')}</td>
                 <td className="p-3">{o.client_phone}</td>
                 <td className="p-3">{o.client_address}</td>
@@ -284,7 +282,7 @@ export default function ArchivePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-3">
-              {t('packagingPhotoTitle').replace('{number}', photoOrder.number)}
+              {t('packagingPhotoTitle').replace('{number}', photoOrder.order_number)}
             </h3>
             {photoOrder.photo_url ? (
               <img

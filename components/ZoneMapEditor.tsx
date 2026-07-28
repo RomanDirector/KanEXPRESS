@@ -400,7 +400,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     if (error) {
       console.error('Ошибка загрузки зон:', error);
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
       return;
     }
 

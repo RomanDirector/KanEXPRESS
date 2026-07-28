@@ -3,13 +3,13 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine, Menu } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
 import { Spinner } from '@/components/ui/spinner'
 
-function Sidebar() {
+function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const { lang, setLang, t } = useLang()
@@ -36,7 +36,18 @@ function Sidebar() {
   }
 
   return (
-    <aside className="w-60 bg-white border-r border-gray-200 flex flex-col py-6 px-4 fixed h-full shadow-sm z-10">
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 md:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        className={`w-60 bg-white border-r border-gray-200 flex flex-col py-6 px-4 fixed h-full shadow-sm z-40 transition-transform duration-200 md:translate-x-0 ${
+          open ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
       {/* Лого */}
       <div className="mb-6 px-2">
         <span className="text-2xl font-black tracking-tight">
@@ -72,6 +83,7 @@ function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
                 isActive
                   ? 'bg-red-600 text-white shadow-md shadow-red-200'
@@ -92,7 +104,8 @@ function Sidebar() {
           <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
 
@@ -151,14 +164,31 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function SellerLayout({ children }: { children: React.ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   return (
     <LangProvider>
       <AuthGuard>
         <div className="flex min-h-screen bg-gray-50">
-          <Sidebar />
-          <main className="ml-60 flex-1 min-h-screen bg-gray-50">
-            {children}
-          </main>
+          <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <div className="flex-1 min-h-screen flex flex-col md:ml-60">
+            <header className="md:hidden flex items-center gap-3 bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-20">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 -ml-2 rounded-lg text-gray-600 hover:bg-gray-100"
+                aria-label="Открыть меню"
+              >
+                <Menu size={22} />
+              </button>
+              <span className="text-lg font-black tracking-tight">
+                <span className="text-red-600">Kan</span>
+                <span className="text-gray-900">EXPRESS</span>
+              </span>
+            </header>
+            <main className="flex-1 bg-gray-50">
+              {children}
+            </main>
+          </div>
         </div>
       </AuthGuard>
     </LangProvider>

@@ -41,7 +41,7 @@ export default function TrackingPage() {
     if (courierErr || orderErr) {
       if (courierErr) console.error(courierErr)
       if (orderErr) console.error(orderErr)
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      setToast({ message: 'Не удалось загрузить данные: ' + (courierErr?.message || orderErr?.message), type: 'error' })
     }
 
     const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({

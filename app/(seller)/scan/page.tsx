@@ -115,7 +115,7 @@ export default function ScanPage() {
 
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
     }
 
     if (!order) {
@@ -138,7 +138,7 @@ export default function ScanPage() {
         .maybeSingle();
       if (boxErr) {
         console.error(boxErr);
-        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+        setToast({ message: 'Не удалось загрузить данные: ' + boxErr.message, type: 'error' });
       }
       if (!box) {
         setErrorMsg(t('boxNotFoundForZoneError'));
@@ -165,7 +165,7 @@ export default function ScanPage() {
           .maybeSingle();
         if (boxErr) {
           console.error(boxErr);
-          setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+          setToast({ message: 'Не удалось загрузить данные: ' + boxErr.message, type: 'error' });
         }
         box = b as BoxRow | null;
       }

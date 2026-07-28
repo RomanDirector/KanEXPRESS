@@ -53,7 +53,7 @@ export default function BoxesPage() {
     ]);
     if (bErr) {
       console.error(bErr);
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      setToast({ message: 'Не удалось загрузить данные: ' + bErr.message, type: 'error' });
     }
     setBoxes((b || []) as unknown as Box[]);
     setZones(z);

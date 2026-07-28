@@ -32,7 +32,7 @@ export default function DeliveryZonesPage() {
       .then((zones) => setZoneCount(zones.length))
       .catch((error) => {
         console.error(error)
-        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+        setToast({ message: 'Не удалось загрузить данные: ' + (error?.message || String(error)), type: 'error' })
       })
   }, [])
 

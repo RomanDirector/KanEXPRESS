@@ -57,7 +57,7 @@ export default function SellerDashboard() {
       .order('created_at', { ascending: false })
     if (error) {
       console.error(error.message)
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' })
     } else setOrders(data as Order[])
     setLoading(false)
   }
@@ -71,7 +71,7 @@ export default function SellerDashboard() {
         .order('created_at', { ascending: false })
       if (error) {
         console.error(error.message)
-        setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+        setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' })
       } else setOrders(data as Order[])
       setLoading(false)
     }
@@ -149,7 +149,7 @@ export default function SellerDashboard() {
       .eq('status', 'active')
     if (couriersError) {
       console.error(couriersError)
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      setToast({ message: 'Не удалось загрузить данные: ' + couriersError.message, type: 'error' })
     }
 
     if (!couriersData || couriersData.length === 0) {

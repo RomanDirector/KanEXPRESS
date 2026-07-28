@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { LogOut, Crown, Check, Pencil, ArrowLeft } from 'lucide-react'
+import { LogOut, Crown, Check, Pencil, ArrowLeft, Camera } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Toast } from '@/components/Toast'
 
+// TODO: требуется alter table sellers add column avatar_url text
 interface SellerData {
   full_name: string
   phone: string
@@ -14,6 +15,7 @@ interface SellerData {
   organization_name: string
   organization_address: string
   notifications_enabled: boolean
+  avatar_url: string | null
 }
 
 interface SubscriptionData {
@@ -85,6 +87,8 @@ export default function ProfilePage() {
   const [upgradeSuccess, setUpgradeSuccess] = useState(false)
 
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [avatarBroken, setAvatarBroken] = useState(false)
 
   useEffect(() => {
     load()
@@ -110,7 +114,7 @@ export default function ProfilePage() {
     ] = await Promise.all([
       supabase
         .from('sellers')
-        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled')
+        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled, avatar_url')
         .eq('id', user.id)
         .single(),
       supabase
@@ -129,7 +133,10 @@ export default function ProfilePage() {
       if (sellerErr) console.error(sellerErr)
       if (subErr) console.error(subErr)
       if (paymentsErr) console.error(paymentsErr)
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' })
+      setToast({
+        message: 'Не удалось загрузить данные: ' + (sellerErr?.message || subErr?.message || paymentsErr?.message),
+        type: 'error',
+      })
     }
 
     setSeller(sellerData as SellerData)
@@ -175,6 +182,45 @@ export default function ProfilePage() {
     setSeller((prev) => (prev ? { ...prev, ...editForm } : prev))
     setIsEditing(false)
     setToast({ message: 'Изменения успешно сохранены', type: 'success' })
+  }
+
+  async function uploadAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !userId) return
+    setUploadingAvatar(true)
+
+    const safeName = file.name
+      .replace(/[^\x00-\x7F]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .toLowerCase() || 'avatar.jpg'
+    const path = `profile/${userId}/${Date.now()}_${safeName}`
+    const { error } = await supabase.storage.from('order-photos').upload(path, file)
+
+    if (error) {
+      console.error(error)
+      setToast({ message: 'Ошибка загрузки: ' + error.message, type: 'error' })
+      setUploadingAvatar(false)
+      e.target.value = ''
+      return
+    }
+
+    const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path)
+    const { error: updateError } = await supabase
+      .from('sellers')
+      .update({ avatar_url: pub.publicUrl })
+      .eq('id', userId)
+
+    if (updateError) {
+      console.error(updateError)
+      setToast({ message: 'Не удалось сохранить изменения: ' + updateError.message, type: 'error' })
+    } else {
+      setAvatarBroken(false)
+      setSeller((prev) => (prev ? { ...prev, avatar_url: pub.publicUrl } : prev))
+      setToast({ message: 'Фото профиля обновлено', type: 'success' })
+    }
+
+    setUploadingAvatar(false)
+    e.target.value = ''
   }
 
   async function cancelSubscription() {
@@ -300,8 +346,32 @@ export default function ProfilePage() {
           Назад
         </Link>
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full bg-red-600 text-white flex items-center justify-center text-lg font-black shrink-0">
-            {getInitials(seller?.full_name)}
+          <div className="relative w-14 h-14 shrink-0">
+            {seller?.avatar_url && !avatarBroken ? (
+              <img
+                src={seller.avatar_url}
+                alt={seller.full_name || 'Аватар'}
+                onError={() => setAvatarBroken(true)}
+                className="w-14 h-14 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-red-600 text-white flex items-center justify-center text-lg font-black">
+                {getInitials(seller?.full_name)}
+              </div>
+            )}
+            <label
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-800 cursor-pointer shadow-sm"
+              title="Изменить фото"
+            >
+              <Camera size={12} />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadAvatar}
+                className="hidden"
+                disabled={uploadingAvatar}
+              />
+            </label>
           </div>
           <div>
             <h1 className="text-2xl font-black text-gray-900 tracking-tight">Профиль</h1>

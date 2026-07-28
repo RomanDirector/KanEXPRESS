@@ -40,6 +40,7 @@ export default function DempingPage() {
   const [loading, setLoading] = useState(true);
   const [showCronInfo, setShowCronInfo] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
 
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
@@ -72,7 +73,7 @@ export default function DempingPage() {
     ]);
     if (rErr) {
       console.error(rErr);
-      setToast({ message: 'Не удалось загрузить данные, проверьте интернет-соединение', type: 'error' });
+      setToast({ message: 'Не удалось загрузить данные: ' + rErr.message, type: 'error' });
     }
     if (hErr) console.error(hErr);
     setRules((r || []) as Rule[]);
@@ -81,12 +82,28 @@ export default function DempingPage() {
   }
 
   async function addRule() {
-    if (!newName.trim() || !newPrice || !newMin || !newMax || !newStep) return;
-    const { data: userData } = await supabase.auth.getUser();
+    if (!newName.trim() || !newPrice || !newMin || !newMax || !newStep) {
+      setToast({
+        message: 'Заполните обязательные поля: Товар, Текущая цена, Мин. цена, Макс. цена, Шаг',
+        type: 'error',
+      });
+      return;
+    }
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
     const sellerId = userData?.user?.id;
-    if (!sellerId) return;
+    if (userErr || !sellerId) {
+      console.error('addRule: failed to resolve current user', userErr);
+      setToast({
+        message: 'Не удалось определить пользователя: ' + (userErr?.message || 'сессия истекла, войдите снова'),
+        type: 'error',
+      });
+      return;
+    }
 
-    const { allowed, max } = await checkLimit(sellerId, 'demping_rules');
+    const { allowed, max, error: limitErr } = await checkLimit(sellerId, 'demping_rules');
+    if (limitErr) {
+      console.error('addRule: checkLimit failed, failing open', limitErr);
+    }
     if (!allowed) {
       alert(`Достигнут лимит ${max} товаров на плане Free. Улучшите план на странице Профиль.`);
       return;
@@ -237,6 +254,52 @@ export default function DempingPage() {
       setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
     }
     loadAll();
+  }
+
+  async function uploadRulePhoto(rule: Rule, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhotoId(rule.id);
+
+    const safeName = file.name
+      .replace(/[^\x00-\x7F]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .toLowerCase() || 'photo.jpg';
+    const path = `demping/${rule.id}/${Date.now()}_${safeName}`;
+    const { error } = await supabase.storage.from('order-photos').upload(path, file);
+
+    if (error) {
+      console.error(error);
+      setToast({ message: 'Ошибка загрузки: ' + error.message, type: 'error' });
+      setUploadingPhotoId(null);
+      e.target.value = '';
+      return;
+    }
+
+    const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path);
+
+    // Оптимистично показываем превью сразу, не дожидаясь ответа update().
+    setRules((prev) =>
+      prev.map((r) => (r.id === rule.id ? { ...r, image_url: pub.publicUrl } : r))
+    );
+
+    const { error: updateError } = await supabase
+      .from('demping_rules')
+      .update({ image_url: pub.publicUrl })
+      .eq('id', rule.id);
+
+    if (updateError) {
+      console.error(updateError);
+      setToast({ message: 'Не удалось сохранить фото: ' + updateError.message, type: 'error' });
+      setRules((prev) =>
+        prev.map((r) => (r.id === rule.id ? { ...r, image_url: rule.image_url } : r))
+      );
+    } else {
+      setToast({ message: 'Фото успешно загружено', type: 'success' });
+    }
+
+    setUploadingPhotoId(null);
+    e.target.value = '';
   }
 
   async function deleteRule(rule: Rule) {
@@ -429,17 +492,34 @@ export default function DempingPage() {
                   return (
                     <tr key={r.id} className="border-b hover:bg-gray-50">
                       <td className="p-3">
-                        {r.image_url ? (
-                          <img
-                            src={r.image_url}
-                            alt={r.product_name}
-                            className="w-10 h-10 rounded object-cover border"
+                        <label
+                          className="relative block w-10 h-10 rounded border cursor-pointer group overflow-hidden"
+                          title={r.image_url ? 'Заменить фото' : 'Загрузить фото'}
+                        >
+                          {r.image_url ? (
+                            <img
+                              src={r.image_url}
+                              alt={r.product_name}
+                              className="w-10 h-10 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center text-gray-400 text-xs">
+                              📷
+                            </div>
+                          )}
+                          {uploadingPhotoId === r.id && (
+                            <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-[10px] text-gray-600">
+                              {t('uploadingLabel')}
+                            </div>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => uploadRulePhoto(r, e)}
+                            className="hidden"
+                            disabled={uploadingPhotoId === r.id}
                           />
-                        ) : (
-                          <div className="w-10 h-10 rounded bg-gray-100 border flex items-center justify-center text-gray-400 text-xs">
-                            —
-                          </div>
-                        )}
+                        </label>
                       </td>
                       <td className="p-3 font-semibold">{r.product_name}</td>
                       <td className="p-3">{r.current_price.toLocaleString('ru-RU')} ₸</td>
