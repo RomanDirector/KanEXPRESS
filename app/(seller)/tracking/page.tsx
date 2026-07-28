@@ -1,201 +1,101 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { MapPin, Phone, Clock, Truck } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 
-interface Order {
-  id: string
-  order_number: string
-  client_phone: string
-  client_address: string
-  status: string
-  price: number
-  courier_name: string | null
-  created_at: string
+function MapLoading() {
+  const { t } = useLang()
+  return <div className="flex items-center justify-center h-96 text-gray-400">{t('loading')}</div>
 }
 
-interface Courier {
-  id: string
-  full_name: string
-  phone: string
-  status: string
+const CourierTrackingMap = dynamic(() => import('@/components/CourierTrackingMap'), {
+  ssr: false,
+  loading: () => <MapLoading />,
+})
+
+interface CourierWithOrders {
+  id: string; full_name: string; phone: string
+  orders: { id: string; order_number: string; client_address: string }[]
 }
 
 export default function TrackingPage() {
   const { t } = useLang()
-  const [orders, setOrders] = useState<Order[]>([])
-  const [couriers, setCouriers] = useState<Courier[]>([])
+  const [tab, setTab] = useState<'list' | 'map'>('map')
+  const [couriers, setCouriers] = useState<CourierWithOrders[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true)
+  useEffect(() => { loadList() }, [])
 
-      const ordersRes = await supabase
-        .from('orders')
-        .select('*')
-        .eq('status', 'in_transit')
-        .order('created_at', { ascending: false })
+  async function loadList() {
+    setLoading(true)
+    const { data: courierRows, error: courierErr } = await supabase.from('couriers').select('id, full_name, phone')
+    if (courierErr) console.error(courierErr)
+    const { data: orderRows, error: orderErr } = await supabase
+      .from('orders').select('id, order_number, client_address, courier_name, status')
+      .eq('status', 'in_transit')
+    if (orderErr) console.error(orderErr)
 
-      const couriersRes = await supabase
-        .from('couriers')
-        .select('*')
-        .eq('status', 'active')
+    const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({
+      id: c.id, full_name: c.full_name, phone: c.phone,
+      orders: (orderRows || []).filter((o: any) => o.courier_name === c.full_name),
+    }))
 
-      if (ordersRes.data) setOrders(ordersRes.data as Order[])
-      if (couriersRes.data) setCouriers(couriersRes.data as Courier[])
-      setLoading(false)
-    }
-
-    fetchData()
-
-    const channel = supabase
-      .channel('tracking-realtime')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => {
-        fetchData()
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
-
-  const ordersByCourier: Record<string, Order[]> = {}
-  orders.forEach((o) => {
-    const key = o.courier_name || 'Не назначен'
-    if (!ordersByCourier[key]) ordersByCourier[key] = []
-    ordersByCourier[key].push(o)
-  })
-
-  const openWhatsApp = (phone: string) => {
-    const cleanPhone = phone.replace(/[^0-9]/g, '')
-    const msg = encodeURIComponent('Здравствуйте! Как идёт доставка?')
-    window.open('https://wa.me/' + cleanPhone + '?text=' + msg, '_blank')
+    setCouriers(result)
+    setLoading(false)
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('trackingTitle')}</h1>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft size={16} />
+            {t('back')}
+          </Link>
+          <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('tracking')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">{t('trackingSub')}</p>
         </div>
-        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl">
-          <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-          <span className="text-sm font-semibold text-blue-700">В пути: {orders.length}</span>
+        <div className="flex rounded-xl border overflow-hidden">
+          <button onClick={() => setTab('map')} className={`px-4 py-2 text-sm font-bold ${tab === 'map' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>{t('map')}</button>
+          <button onClick={() => setTab('list')} className={`px-4 py-2 text-sm font-bold ${tab === 'list' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}>{t('list')}</button>
         </div>
       </header>
 
       <main className="px-8 py-6 max-w-7xl mx-auto">
-        {loading ? (
-          <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
-        ) : orders.length === 0 ? (
-          <div className="text-center py-20">
-            <Truck size={48} className="text-gray-200 mx-auto mb-4" />
-            <p className="text-gray-400 text-sm">Нет активных доставок</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-6">
-            {Object.entries(ordersByCourier).map(([courierName, courierOrders]) => {
-              const courier = couriers.find((c) => c.full_name === courierName)
-              const totalSum = courierOrders.reduce((sum, o) => sum + (o.price || 0), 0)
+        {tab === 'map' && <CourierTrackingMap />}
 
-              return (
-                <div
-                  key={courierName}
-                  className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
-                >
-                  <div className="bg-gradient-to-r from-blue-50 to-blue-100 px-6 py-4 flex items-center justify-between border-b border-blue-200">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
-                        <Truck size={20} className="text-white" />
-                      </div>
-                      <div>
-                        <p className="font-black text-gray-900">{courierName}</p>
-                        {courier && (
-                          <div className="flex items-center gap-1 text-xs text-gray-500">
-                            <Phone size={11} />
-                            <span>{courier.phone}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-blue-700 bg-blue-200 px-3 py-1 rounded-full">
-                        {courierOrders.length} заказов
-                      </span>
-                      {courier && (
-                        <button
-                          onClick={() => openWhatsApp(courier.phone)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                        >
-                          💬 WhatsApp
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="divide-y divide-gray-50">
-                    {courierOrders.map((order, idx) => (
-                      <div
-                        key={order.id}
-                        className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
-                          <span className="text-xs font-black text-blue-700">#{idx + 1}</span>
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-mono font-bold text-gray-900 text-sm">
-                              {order.order_number}
-                            </span>
-                            <span className="text-xs text-gray-400">|</span>
-                            <span className="text-xs text-gray-500">{order.client_phone}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                            <MapPin size={11} className="text-gray-400" />
-                            <span>{order.client_address}</span>
-                          </div>
-                        </div>
-
-                        <div className="text-right">
-                          <p className="font-bold text-gray-900 text-sm">
-                            {(order.price || 0).toLocaleString('ru-RU')} ₸
-                          </p>
-                          <div className="flex items-center gap-1 text-xs text-blue-600 mt-0.5 justify-end">
-                            <Clock size={10} />
-                            <span>
-                              {new Date(order.created_at).toLocaleTimeString('ru-RU', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 border border-blue-200 text-blue-700">
-                          <Truck size={11} />
-                          {t('in_transit')}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-gray-50 px-6 py-3 flex items-center justify-between border-t border-gray-100">
-                    <span className="text-xs text-gray-400">
-                      Итого заказов: {courierOrders.length}
-                    </span>
-                    <span className="text-xs font-bold text-gray-700">
-                      Сумма: {totalSum.toLocaleString('ru-RU')} ₸
-                    </span>
-                  </div>
+        {tab === 'list' && (
+          <div className="space-y-4">
+            {loading && <p className="text-gray-400">{t('loading')}</p>}
+            {!loading && couriers.length === 0 && <p className="text-gray-400">{t('noCouriers')}</p>}
+            {couriers.map((c) => (
+              <div key={c.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <div><span className="font-bold">{c.full_name}</span><span className="text-gray-400 ml-3 text-sm">{c.phone}</span></div>
+                  <span className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold">{t('inTransitCount').replace('{count}', String(c.orders.length))}</span>
                 </div>
-              )
-            })}
+                {c.orders.length > 0 && (
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-left text-gray-400 text-xs uppercase"><th className="py-1 pr-4">#</th><th className="py-1">{t('address')}</th></tr></thead>
+                    <tbody>
+                      {c.orders.map((o) => (
+                        <tr key={o.id} className="border-t border-gray-50">
+                          <td className="py-1.5 pr-4 font-mono font-bold text-gray-900">{o.order_number}</td>
+                          <td className="py-1.5 text-gray-500">{o.client_address}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </main>

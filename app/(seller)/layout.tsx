@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, LogOut, Ban } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
 import { SellerContext, type SellerProfile } from '@/lib/seller-context'
@@ -15,14 +15,17 @@ function Sidebar() {
   const { lang, setLang, t } = useLang()
 
   const navItems = [
-    { href: '/dashboard',   label: t('dashboard'), icon: LayoutDashboard },
-    { href: '/invoices',    label: t('invoices'),  icon: FileText },
-    { href: '/orders-map',  label: t('map'),       icon: Map },
-    { href: '/tracking',    label: t('tracking'),  icon: Navigation },
-    { href: '/stats',       label: t('stats'),     icon: BarChart2 },
-    { href: '/staff',       label: t('staff'),     icon: Users },
-    { href: '/archive',     label: t('archive'),   icon: Archive },
-    { href: '/cancelled',   label: t('cancelled'), icon: Ban },
+    { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
+    { href: '/invoices',        label: t('invoices'),      icon: FileText },
+    { href: '/orders-map',      label: t('map'),           icon: Map },
+    { href: '/delivery-zones',  label: t('deliveryZones'), icon: MapPinned },
+    { href: '/tracking',        label: t('tracking'),      icon: Navigation },
+    { href: '/demping',         label: t('demping'),       icon: TrendingDown },
+    { href: '/stats',           label: t('stats'),         icon: BarChart2 },
+    { href: '/staff',           label: t('staff'),         icon: Users },
+    { href: '/archive',         label: t('archive'),       icon: Archive },
+    { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
+    { href: '/profile',         label: 'Профиль',          icon: User },
   ]
 
   const handleLogout = async () => {
@@ -80,19 +83,10 @@ function Sidebar() {
         })}
       </nav>
 
-      {/* Выход */}
-      <button
-        onClick={handleLogout}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:bg-red-50 hover:text-red-600 transition-all mb-3"
-      >
-        <LogOut size={18} />
-        <span>Выйти</span>
-      </button>
-
       {/* Низ sidebar */}
       <div className="px-2">
         <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-          <p className="text-xs font-bold text-red-600">KanEXpress</p>
+          <p className="text-xs font-bold text-red-600">KanExpress</p>
           <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>
         </div>
       </div>

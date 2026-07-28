@@ -4,23 +4,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle, Ban } from 'lucide-react'
+import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
-type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
 interface Order {
   id: string
@@ -28,21 +18,14 @@ interface Order {
   client_phone: string
   client_address: string
   status: OrderStatus
-  courier_stage: CourierStage | null
   price: number
   courier_name: string | null
   comment: string | null
   lat: number | null
   lng: number | null
+  photo_url: string | null
   created_at: string
 }
-
-const SELLER_CANCEL_REASONS: { value: string; label: string }[] = [
-  { value: 'Нет в наличии', label: 'Нет в наличии' },
-  { value: 'Клиент передумал', label: 'Клиент передумал' },
-  { value: 'Дубликат заказа', label: 'Дубликат заказа' },
-  { value: 'other', label: 'Другое' },
-]
 
 const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React.ReactNode }> = {
   pending:    { color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200',  icon: <Package size={13} /> },
@@ -59,14 +42,22 @@ export default function SellerDashboard() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [distributing, setDistributing] = useState(false)
-  const [cancelOrder, setCancelOrder] = useState<Order | null>(null)
-  const [cancelReason, setCancelReason] = useState(SELLER_CANCEL_REASONS[0].value)
-  const [cancelComment, setCancelComment] = useState('')
-  const [cancelError, setCancelError] = useState('')
-  const [cancelSubmitting, setCancelSubmitting] = useState(false)
+  const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  async function refreshOrders() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (error) console.error(error.message)
+    else setOrders(data as Order[])
+    setLoading(false)
+  }
 
   useEffect(() => {
-    const fetchOrders = async () => {
+    async function fetchOrders() {
       setLoading(true)
       const { data, error } = await supabase
         .from('orders')
@@ -110,53 +101,9 @@ export default function SellerDashboard() {
 
   const massSetStatus = async (status: OrderStatus) => {
     if (selected.size === 0) return
-    await supabase.from('orders').update({ status }).in('id', Array.from(selected))
+    const { error } = await supabase.from('orders').update({ status }).in('id', Array.from(selected))
+    if (error) console.error(error)
     setSelected(new Set())
-  }
-
-  function openCancelDialog(order: Order) {
-    setCancelOrder(order)
-    setCancelReason(SELLER_CANCEL_REASONS[0].value)
-    setCancelComment('')
-    setCancelError('')
-  }
-
-  function closeCancelDialog() {
-    setCancelOrder(null)
-    setCancelError('')
-    setCancelSubmitting(false)
-  }
-
-  async function submitCancel() {
-    if (!cancelOrder) return
-
-    const isOther = cancelReason === 'other'
-    if (isOther && !cancelComment.trim()) {
-      setCancelError('Опишите причину отмены')
-      return
-    }
-
-    setCancelSubmitting(true)
-    setCancelError('')
-
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        courier_stage: 'cancelled',
-        cancel_reason: isOther ? cancelComment.trim() : cancelReason,
-        cancelled_by: 'seller',
-        cancelled_at: new Date().toISOString(),
-      })
-      .eq('id', cancelOrder.id)
-
-    if (error) {
-      console.error(error.message)
-      setCancelError('Не удалось отменить заказ, попробуйте снова')
-      setCancelSubmitting(false)
-      return
-    }
-
-    closeCancelDialog()
   }
 
   const whatsappBroadcast = () => {
@@ -165,12 +112,13 @@ export default function SellerDashboard() {
       alert('Нет заказов для рассылки!')
       return
     }
-    const firstOrder = pendingOrders[0]
-    const phone = firstOrder.client_phone.replace(/[^0-9]/g, '')
-    const msg = encodeURIComponent(
-      'Здравствуйте! Ваш заказ ' + firstOrder.order_number + ' принят и скоро будет передан курьеру. Спасибо за покупку! — KanEXpress'
-    )
-    window.open('https://wa.me/' + phone + '?text=' + msg, '_blank')
+
+    pendingOrders.forEach((order, i) => {
+      setTimeout(() => {
+        const text = waTemplates.order_accepted({ number: order.order_number })
+        openWhatsApp(order.client_phone, text)
+      }, i * 700)
+    })
   }
 
   const distributeOrders = async () => {
@@ -182,10 +130,11 @@ export default function SellerDashboard() {
 
     setDistributing(true)
 
-    const { data: couriersData } = await supabase
+    const { data: couriersData, error: couriersError } = await supabase
       .from('couriers')
       .select('*')
       .eq('status', 'active')
+    if (couriersError) console.error(couriersError)
 
     if (!couriersData || couriersData.length === 0) {
       alert('Нет активных курьеров!')
@@ -195,10 +144,11 @@ export default function SellerDashboard() {
 
     for (let i = 0; i < pendingOrders.length; i++) {
       const courier = couriersData[i % couriersData.length]
-      await supabase
+      const { error } = await supabase
         .from('orders')
         .update({ courier_name: courier.full_name, status: 'in_transit' })
         .eq('id', pendingOrders[i].id)
+      if (error) console.error(error)
     }
 
     setDistributing(false)
@@ -229,6 +179,36 @@ export default function SellerDashboard() {
       status: o.status,
       price: o.price,
     }))
+
+  async function uploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !photoOrder) return
+    setUploading(true)
+
+    const safeName = file.name
+      .replace(/[^\x00-\x7F]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .toLowerCase() || 'photo.jpg'
+    const path = `${photoOrder.id}/${Date.now()}_${safeName}`
+    const { error } = await supabase.storage.from('order-photos').upload(path, file)
+
+    if (error) {
+      alert('Ошибка загрузки: ' + error.message)
+      setUploading(false)
+      return
+    }
+
+    const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path)
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({ photo_url: pub.publicUrl })
+      .eq('id', photoOrder.id)
+    if (updateError) console.error(updateError)
+
+    setUploading(false)
+    setPhotoOrder(null)
+    refreshOrders()
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -380,13 +360,12 @@ export default function SellerDashboard() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('courier')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('status')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
-                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Действия</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">WA</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">📷</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((order) => {
-                  const isCancelled = order.courier_stage === 'cancelled'
-                  return (
+                {filtered.map((order) => (
                   <tr
                     key={order.id}
                     className={`hover:bg-gray-50 transition-colors ${selected.has(order.id) ? 'bg-red-50' : ''}`}
@@ -405,36 +384,40 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString('ru-RU')} ₸</td>
                     <td className="px-4 py-4 text-gray-600 text-xs">{order.courier_name || '—'}</td>
                     <td className="px-4 py-4">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
-                          {STATUS_STYLE[order.status].icon}
-                          {t(order.status)}
-                        </span>
-                        {isCancelled && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border border-red-200 bg-red-50 text-red-700">
-                            <Ban size={12} />
-                            Отменён
-                          </span>
-                        )}
-                      </div>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
+                        {STATUS_STYLE[order.status].icon}
+                        {t(order.status)}
+                      </span>
                     </td>
                     <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
                     <td className="px-4 py-4">
-                      {order.status !== 'delivered' && !isCancelled && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => openCancelDialog(order)}
-                        >
-                          <Ban className="mr-1.5 h-3.5 w-3.5" />
-                          Отменить
-                        </Button>
-                      )}
+                      <button
+                        onClick={() => {
+                          const template =
+                            order.status === 'delivered'
+                              ? waTemplates.order_delivered({ number: order.order_number })
+                              : order.status === 'in_transit'
+                              ? waTemplates.order_in_transit({ number: order.order_number })
+                              : waTemplates.order_accepted({ number: order.order_number })
+                          openWhatsApp(order.client_phone, template)
+                        }}
+                        className="text-green-600 font-bold text-xs hover:underline"
+                        title="Написать в WhatsApp"
+                      >
+                        WA
+                      </button>
+                    </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => setPhotoOrder(order)}
+                        className={`text-lg ${order.photo_url ? '' : 'opacity-40'}`}
+                        title={order.photo_url ? 'Смотреть фото' : 'Загрузить фото'}
+                      >
+                        📷
+                      </button>
                     </td>
                   </tr>
-                  )
-                })}
+                ))}
               </tbody>
             </table>
           </div>
@@ -458,52 +441,35 @@ export default function SellerDashboard() {
         </div>
       </main>
 
-      <Dialog open={!!cancelOrder} onOpenChange={(open) => !open && closeCancelDialog()}>
-        <DialogContent className="rounded-2xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Отменить заказ {cancelOrder?.order_number}</DialogTitle>
-            <DialogDescription>Укажите причину отмены</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2">
-            {SELLER_CANCEL_REASONS.map((reason) => (
-              <label
-                key={reason.value}
-                className="flex items-center gap-2.5 rounded-xl border border-gray-200 px-3 py-2.5 text-sm cursor-pointer transition-colors has-[:checked]:border-red-400 has-[:checked]:bg-red-50"
-              >
-                <input
-                  type="radio"
-                  name="seller-cancel-reason"
-                  className="h-4 w-4 accent-red-600"
-                  checked={cancelReason === reason.value}
-                  onChange={() => setCancelReason(reason.value)}
-                />
-                {reason.label}
-              </label>
-            ))}
-
-            {cancelReason === 'other' && (
-              <Textarea
-                value={cancelComment}
-                onChange={(e) => setCancelComment(e.target.value)}
-                placeholder="Опишите причину отмены"
-                className="mt-1"
-              />
+      {/* Модалка фото */}
+      {photoOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPhotoOrder(null)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold mb-3">Фото упаковки — заказ {photoOrder.order_number}</h3>
+            {photoOrder.photo_url ? (
+              <img src={photoOrder.photo_url} alt="Фото упаковки" className="w-full rounded-xl mb-3" />
+            ) : (
+              <p className="text-gray-500 mb-3">Фото ещё не загружено</p>
             )}
+            <label className="block px-4 py-2 rounded-xl bg-red-600 text-white text-center font-semibold cursor-pointer hover:bg-red-700">
+              {uploading ? 'Загружаю…' : photoOrder.photo_url ? 'Заменить фото' : 'Загрузить фото'}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadPhoto}
+                className="hidden"
+                disabled={uploading}
+              />
+            </label>
           </div>
-
-          {cancelError && <p className="text-sm text-red-600">{cancelError}</p>}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeCancelDialog} disabled={cancelSubmitting}>
-              Назад
-            </Button>
-            <Button variant="destructive" onClick={submitCancel} disabled={cancelSubmitting}>
-              {cancelSubmitting ? 'Отменяем...' : 'Подтвердить отмену'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </div>
   )
 }
