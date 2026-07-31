@@ -5,8 +5,9 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
-import { useLang } from '@/lib/i18n'
-import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates'
+import { useLang, localeTag } from '@/lib/i18n'
+import { waTemplates, openWhatsApp, defaultDeliveryWindow } from '@/lib/whatsapp-templates'
+import { getSellerCourierIds } from '@/lib/couriers'
 import { Toast } from '@/components/Toast'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
@@ -37,7 +38,8 @@ const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React
 }
 
 export default function SellerDashboard() {
-  const { t } = useLang()
+  const { t, lang } = useLang()
+  const locale = localeTag(lang)
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all')
@@ -48,39 +50,67 @@ export default function SellerDashboard() {
   const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
   const [uploading, setUploading] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [sellerId, setSellerId] = useState<string | null>(null)
 
   async function refreshOrders() {
+    if (!sellerId) return
     setLoading(true)
     const { data, error } = await supabase
       .from('orders')
-      .select('*')
+      .select(
+        'id, order_number, client_phone, client_address, status, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+      )
+      .eq('seller_id', sellerId)
       .order('created_at', { ascending: false })
     if (error) {
       console.error(error.message)
-      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' })
+      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
     } else setOrders(data as Order[])
     setLoading(false)
   }
 
   useEffect(() => {
-    async function fetchOrders() {
+    let cancelled = false
+
+    async function fetchOrders(currentSellerId: string) {
       setLoading(true)
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select(
+          'id, order_number, client_phone, client_address, status, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+        )
+        .eq('seller_id', currentSellerId)
         .order('created_at', { ascending: false })
       if (error) {
         console.error(error.message)
-        setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' })
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
       } else setOrders(data as Order[])
       setLoading(false)
     }
-    fetchOrders()
-    const channel = supabase
-      .channel('orders-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchOrders)
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (cancelled || !user) return
+      setSellerId(user.id)
+      await fetchOrders(user.id)
+      channel = supabase
+        .channel('orders-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders', filter: `seller_id=eq.${user.id}` },
+          () => fetchOrders(user.id)
+        )
+        .subscribe()
+    })()
+
+    return () => {
+      cancelled = true
+      if (channel) supabase.removeChannel(channel)
+    }
   }, [])
 
   const filtered = orders.filter((o) => {
@@ -108,72 +138,116 @@ export default function SellerDashboard() {
   }
 
   const massSetStatus = async (status: OrderStatus) => {
-    if (selected.size === 0) return
-    const { error } = await supabase.from('orders').update({ status }).in('id', Array.from(selected))
+    if (selected.size === 0 || !sellerId) return
+    const targetIds = Array.from(selected)
+    // Сравниваем с состоянием ДО обновления, чтобы не полагаться на ре-рендер и не отправить WA повторно, если статус фактически не менялся.
+    const changedOrders = orders.filter(o => targetIds.includes(o.id) && o.status !== status)
+
+    const { error } = await supabase.from('orders').update({ status }).in('id', targetIds).eq('seller_id', sellerId)
     if (error) {
       console.error(error)
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
-    } else {
-      setToast({ message: 'Статус успешно обновлён', type: 'success' })
+      setToast({ message: t('saveErrorGeneric'), type: 'error' })
+      setSelected(new Set())
+      return
     }
+    setToast({ message: t('statusUpdatedMsg'), type: 'success' })
     setSelected(new Set())
+
+    if ((status === 'in_transit' || status === 'delivered') && changedOrders.length > 0) {
+      changedOrders.forEach((order, i) => {
+        setTimeout(() => {
+          const text =
+            status === 'in_transit'
+              ? waTemplates.order_in_transit({ number: order.order_number })
+              : waTemplates.order_delivered({ number: order.order_number })
+          openWhatsApp(order.client_phone, text)
+        }, i * 700)
+      })
+      setToast({ message: t('waSentMsg'), type: 'success' })
+    }
   }
 
   const whatsappBroadcast = () => {
     const pendingOrders = orders.filter(o => o.status === 'pending')
     if (pendingOrders.length === 0) {
-      alert('Нет заказов для рассылки!')
+      alert(t('noOrdersForBroadcast'))
       return
     }
 
     pendingOrders.forEach((order, i) => {
       setTimeout(() => {
-        const text = waTemplates.order_accepted({ number: order.order_number })
+        const { deliveryFrom, deliveryTo } = defaultDeliveryWindow()
+        const text = waTemplates.order_accepted({ number: order.order_number, deliveryFrom, deliveryTo })
         openWhatsApp(order.client_phone, text)
       }, i * 700)
     })
   }
 
   const distributeOrders = async () => {
+    if (!sellerId) return
     const pendingOrders = orders.filter(o => o.status === 'pending' && !o.courier_name)
     if (pendingOrders.length === 0) {
-      alert('Нет заказов для распределения!')
+      alert(t('noOrdersForDistribution'))
       return
     }
 
     setDistributing(true)
 
+    const courierIds = await getSellerCourierIds(sellerId)
+    if (courierIds.length === 0) {
+      alert(t('noActiveCouriers'))
+      setDistributing(false)
+      return
+    }
+
     const { data: couriersData, error: couriersError } = await supabase
       .from('couriers')
-      .select('*')
+      .select('id, full_name')
       .eq('status', 'active')
+      .in('id', courierIds)
     if (couriersError) {
       console.error(couriersError)
-      setToast({ message: 'Не удалось загрузить данные: ' + couriersError.message, type: 'error' })
+      setToast({ message: t('loadErrorPrefix') + couriersError.message, type: 'error' })
     }
 
     if (!couriersData || couriersData.length === 0) {
-      alert('Нет активных курьеров!')
+      alert(t('noActiveCouriers'))
       setDistributing(false)
       return
     }
 
     let hadError = false
+    const distributed: Order[] = []
     for (let i = 0; i < pendingOrders.length; i++) {
       const courier = couriersData[i % couriersData.length]
       const { error } = await supabase
         .from('orders')
         .update({ courier_name: courier.full_name, status: 'in_transit' })
         .eq('id', pendingOrders[i].id)
+        .eq('seller_id', sellerId)
       if (error) {
         console.error(error)
         hadError = true
+      } else {
+        // pendingOrders отфильтрован по status === 'pending', так что переход в in_transit здесь всегда фактическая смена статуса.
+        distributed.push(pendingOrders[i])
       }
     }
-    if (hadError) setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
+    if (hadError) setToast({ message: t('saveErrorGeneric'), type: 'error' })
+
+    distributed.forEach((order, i) => {
+      setTimeout(() => {
+        const text = waTemplates.order_in_transit({ number: order.order_number })
+        openWhatsApp(order.client_phone, text)
+      }, i * 700)
+    })
+    if (distributed.length > 0 && !hadError) {
+      setToast({ message: t('waSentMsg'), type: 'success' })
+    }
 
     setDistributing(false)
-    window.location.reload()
+    // Ждём, пока отработают все запланированные setTimeout с открытием WhatsApp — иначе reload() оборвёт их до выполнения.
+    setTimeout(() => window.location.reload(), distributed.length * 700 + 500)
   }
 
   const statCounts: Record<OrderStatus, number> = {
@@ -214,7 +288,7 @@ export default function SellerDashboard() {
     const { error } = await supabase.storage.from('order-photos').upload(path, file)
 
     if (error) {
-      alert('Ошибка загрузки: ' + error.message)
+      alert(t('uploadErrorPrefix') + error.message)
       setUploading(false)
       return
     }
@@ -224,11 +298,12 @@ export default function SellerDashboard() {
       .from('orders')
       .update({ photo_url: pub.publicUrl })
       .eq('id', photoOrder.id)
+      .eq('seller_id', sellerId ?? '')
     if (updateError) {
       console.error(updateError)
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
+      setToast({ message: t('saveErrorGeneric'), type: 'error' })
     } else {
-      setToast({ message: 'Фото успешно загружено', type: 'success' })
+      setToast({ message: t('photoUploadedMsg'), type: 'success' })
     }
 
     setUploading(false)
@@ -257,7 +332,7 @@ export default function SellerDashboard() {
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-blue-200"
           >
             <Shuffle size={16} />
-            {distributing ? 'Распределяю...' : t('distribute')}
+            {distributing ? t('distributingLabel') : t('distribute')}
           </button>
           <Link href="/invoices">
             <button className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-red-100">
@@ -407,7 +482,7 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4 font-mono font-bold text-gray-900">{order.order_number}</td>
                     <td className="px-4 py-4 text-gray-600">{order.client_phone}</td>
                     <td className="px-4 py-4 text-gray-500 max-w-[160px] truncate">{order.client_address}</td>
-                    <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString('ru-RU')} ₸</td>
+                    <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString(locale)} ₸</td>
                     <td className="px-4 py-4 text-gray-600 text-xs">{order.courier_name || '—'}</td>
                     <td className="px-4 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
@@ -426,7 +501,7 @@ export default function SellerDashboard() {
                         />
                       ) : null}
                     </td>
-                    <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString('ru-RU')}</td>
+                    <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString(locale)}</td>
                     <td className="px-4 py-4">
                       <button
                         onClick={() => {
@@ -435,11 +510,11 @@ export default function SellerDashboard() {
                               ? waTemplates.order_delivered({ number: order.order_number })
                               : order.status === 'in_transit'
                               ? waTemplates.order_in_transit({ number: order.order_number })
-                              : waTemplates.order_accepted({ number: order.order_number })
+                              : waTemplates.order_accepted({ number: order.order_number, ...defaultDeliveryWindow() })
                           openWhatsApp(order.client_phone, template)
                         }}
                         className="text-green-600 font-bold text-xs hover:underline"
-                        title="Написать в WhatsApp"
+                        title={t('writeWhatsAppTitle')}
                       >
                         WA
                       </button>
@@ -448,7 +523,7 @@ export default function SellerDashboard() {
                       <button
                         onClick={() => setPhotoOrder(order)}
                         className={`text-lg ${order.photo_url ? '' : 'opacity-40'}`}
-                        title={order.photo_url ? 'Смотреть фото' : 'Загрузить фото'}
+                        title={order.photo_url ? t('viewPhoto') : t('uploadPhotoBtn')}
                       >
                         📷
                       </button>
@@ -470,7 +545,7 @@ export default function SellerDashboard() {
             <p className="text-sm font-bold text-gray-700">{t('ordersMap')}</p>
             <Link href="/orders-map">
               <button className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline">
-                Открыть полную карту →
+                {t('openFullMapBtn')}
               </button>
             </Link>
           </div>
@@ -488,14 +563,14 @@ export default function SellerDashboard() {
             className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-bold mb-3">Фото упаковки — заказ {photoOrder.order_number}</h3>
+            <h3 className="font-bold mb-3">{t('packagingPhotoTitle').replace('{number}', photoOrder.order_number)}</h3>
             {photoOrder.photo_url ? (
-              <img src={photoOrder.photo_url} alt="Фото упаковки" className="w-full rounded-xl mb-3" />
+              <img src={photoOrder.photo_url} alt={t('packagingPhotoAlt')} className="w-full rounded-xl mb-3" />
             ) : (
-              <p className="text-gray-500 mb-3">Фото ещё не загружено</p>
+              <p className="text-gray-500 mb-3">{t('photoNotUploaded')}</p>
             )}
             <label className="block px-4 py-2 rounded-xl bg-red-600 text-white text-center font-semibold cursor-pointer hover:bg-red-700">
-              {uploading ? 'Загружаю…' : photoOrder.photo_url ? 'Заменить фото' : 'Загрузить фото'}
+              {uploading ? t('uploadingLabel') : photoOrder.photo_url ? t('replacePhoto') : t('uploadPhotoBtn')}
               <input
                 type="file"
                 accept="image/*"

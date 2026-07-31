@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { LogOut, Crown, Check, Pencil, ArrowLeft, Camera } from 'lucide-react'
+import { LogOut, Crown, Pencil, ArrowLeft, Camera, Image as ImageIcon, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { computeSubscriptionStatus } from '@/lib/limits'
+import { useLang, localeTag } from '@/lib/i18n'
 import { Toast } from '@/components/Toast'
 
 // TODO: требуется alter table sellers add column avatar_url text
@@ -16,12 +18,16 @@ interface SellerData {
   organization_address: string
   notifications_enabled: boolean
   avatar_url: string | null
+  company_logo_url: string | null
 }
+
+const MAX_LOGO_SIZE_BYTES = 2 * 1024 * 1024
 
 interface SubscriptionData {
   plan: 'free' | 'pro'
   expires_at: string | null
   cancel_at_period_end: boolean
+  trial_ends_at: string | null
 }
 
 interface PaymentRow {
@@ -34,13 +40,6 @@ interface PaymentRow {
 
 type EditableFields = 'full_name' | 'phone' | 'organization_name' | 'organization_address'
 
-const EDIT_FIELDS: { key: EditableFields; label: string }[] = [
-  { key: 'full_name', label: 'ФИО' },
-  { key: 'phone', label: 'Телефон' },
-  { key: 'organization_name', label: 'Организация' },
-  { key: 'organization_address', label: 'Адрес организации' },
-]
-
 function getInitials(fullName: string | undefined | null) {
   if (!fullName) return '?'
   const parts = fullName.trim().split(/\s+/).filter(Boolean)
@@ -48,12 +47,20 @@ function getInitials(fullName: string | undefined | null) {
   return initials || '?'
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null, locale: string) {
   if (!value) return '—'
-  return new Date(value).toLocaleDateString('ru-RU')
+  return new Date(value).toLocaleDateString(locale)
 }
 
 export default function ProfilePage() {
+  const { t, lang } = useLang()
+  const locale = localeTag(lang)
+  const EDIT_FIELDS: { key: EditableFields; label: string }[] = [
+    { key: 'full_name', label: t('fullNameLabel') },
+    { key: 'phone', label: t('phone') },
+    { key: 'organization_name', label: t('organizationNameLabel') },
+    { key: 'organization_address', label: t('organizationAddressLabel') },
+  ]
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [seller, setSeller] = useState<SellerData | null>(null)
@@ -61,6 +68,7 @@ export default function ProfilePage() {
     plan: 'free',
     expires_at: null,
     cancel_at_period_end: false,
+    trial_ends_at: null,
   })
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,6 +97,7 @@ export default function ProfilePage() {
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarBroken, setAvatarBroken] = useState(false)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
 
   useEffect(() => {
     load()
@@ -114,17 +123,17 @@ export default function ProfilePage() {
     ] = await Promise.all([
       supabase
         .from('sellers')
-        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled, avatar_url')
+        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled, avatar_url, company_logo_url')
         .eq('id', user.id)
         .single(),
       supabase
         .from('seller_subscriptions')
-        .select('plan, expires_at, cancel_at_period_end')
+        .select('plan, expires_at, cancel_at_period_end, trial_ends_at')
         .eq('seller_id', user.id)
         .maybeSingle(),
       supabase
         .from('payment_history')
-        .select('*')
+        .select('id, amount, plan, status, created_at')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false }),
     ])
@@ -134,7 +143,7 @@ export default function ProfilePage() {
       if (subErr) console.error(subErr)
       if (paymentsErr) console.error(paymentsErr)
       setToast({
-        message: 'Не удалось загрузить данные: ' + (sellerErr?.message || subErr?.message || paymentsErr?.message),
+        message: t('loadErrorPrefix') + (sellerErr?.message || subErr?.message || paymentsErr?.message),
         type: 'error',
       })
     }
@@ -144,6 +153,7 @@ export default function ProfilePage() {
       plan: subData?.plan === 'pro' ? 'pro' : 'free',
       expires_at: subData?.expires_at ?? null,
       cancel_at_period_end: subData?.cancel_at_period_end ?? false,
+      trial_ends_at: subData?.trial_ends_at ?? null,
     })
     setPayments((paymentsData || []) as PaymentRow[])
     setLoading(false)
@@ -176,12 +186,12 @@ export default function ProfilePage() {
     setSavingProfile(false)
     if (error) {
       console.error(error)
-      alert('Ошибка сохранения: ' + error.message)
+      alert(t('saveErrorPrefix') + error.message)
       return
     }
     setSeller((prev) => (prev ? { ...prev, ...editForm } : prev))
     setIsEditing(false)
-    setToast({ message: 'Изменения успешно сохранены', type: 'success' })
+    setToast({ message: t('profileSavedMsg'), type: 'success' })
   }
 
   async function uploadAvatar(e: React.ChangeEvent<HTMLInputElement>) {
@@ -198,7 +208,7 @@ export default function ProfilePage() {
 
     if (error) {
       console.error(error)
-      setToast({ message: 'Ошибка загрузки: ' + error.message, type: 'error' })
+      setToast({ message: t('uploadErrorPrefix') + error.message, type: 'error' })
       setUploadingAvatar(false)
       e.target.value = ''
       return
@@ -212,21 +222,85 @@ export default function ProfilePage() {
 
     if (updateError) {
       console.error(updateError)
-      setToast({ message: 'Не удалось сохранить изменения: ' + updateError.message, type: 'error' })
+      setToast({ message: t('saveChangesErrorPrefix') + updateError.message, type: 'error' })
     } else {
       setAvatarBroken(false)
       setSeller((prev) => (prev ? { ...prev, avatar_url: pub.publicUrl } : prev))
-      setToast({ message: 'Фото профиля обновлено', type: 'success' })
+      setToast({ message: t('avatarUpdatedMsg'), type: 'success' })
     }
 
     setUploadingAvatar(false)
     e.target.value = ''
   }
 
+  async function uploadLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !userId) return
+
+    if (!file.type.startsWith('image/')) {
+      setToast({ message: t('imageOnlyErrorMsg'), type: 'error' })
+      e.target.value = ''
+      return
+    }
+    if (file.size > MAX_LOGO_SIZE_BYTES) {
+      setToast({ message: t('fileTooLargeMsg'), type: 'error' })
+      e.target.value = ''
+      return
+    }
+
+    setUploadingLogo(true)
+
+    const safeName = file.name
+      .replace(/[^\x00-\x7F]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .toLowerCase() || 'logo.jpg'
+    const path = `logo/${userId}/${Date.now()}_${safeName}`
+    const { error } = await supabase.storage.from('order-photos').upload(path, file)
+
+    if (error) {
+      console.error(error)
+      setToast({ message: t('uploadErrorPrefix') + error.message, type: 'error' })
+      setUploadingLogo(false)
+      e.target.value = ''
+      return
+    }
+
+    const { data: pub } = supabase.storage.from('order-photos').getPublicUrl(path)
+    const { error: updateError } = await supabase
+      .from('sellers')
+      .update({ company_logo_url: pub.publicUrl })
+      .eq('id', userId)
+
+    if (updateError) {
+      console.error(updateError)
+      setToast({ message: t('saveChangesErrorPrefix') + updateError.message, type: 'error' })
+    } else {
+      setSeller((prev) => (prev ? { ...prev, company_logo_url: pub.publicUrl } : prev))
+      setToast({ message: t('logoUploadedMsg'), type: 'success' })
+    }
+
+    setUploadingLogo(false)
+    e.target.value = ''
+  }
+
+  async function deleteLogo() {
+    if (!userId) return
+    setUploadingLogo(true)
+    const { error } = await supabase.from('sellers').update({ company_logo_url: null }).eq('id', userId)
+    setUploadingLogo(false)
+    if (error) {
+      console.error(error)
+      setToast({ message: t('logoDeleteErrorPrefix') + error.message, type: 'error' })
+      return
+    }
+    setSeller((prev) => (prev ? { ...prev, company_logo_url: null } : prev))
+    setToast({ message: t('logoDeletedMsg'), type: 'success' })
+  }
+
   async function cancelSubscription() {
     if (!userId) return
-    const dateLabel = formatDate(subscription.expires_at)
-    if (!confirm(`Подписка будет действовать до ${dateLabel}, затем перейдёт на Free. Отменить?`)) return
+    const dateLabel = formatDate(subscription.expires_at, locale)
+    if (!confirm(t('cancelSubscriptionConfirm').replace('{date}', dateLabel))) return
 
     setSubscription((prev) => ({ ...prev, cancel_at_period_end: true }))
     const { error } = await supabase
@@ -235,10 +309,10 @@ export default function ProfilePage() {
       .eq('seller_id', userId)
     if (error) {
       console.error(error)
-      alert('Ошибка отмены подписки: ' + error.message)
+      alert(t('cancelSubErrorPrefix') + error.message)
       setSubscription((prev) => ({ ...prev, cancel_at_period_end: false }))
     } else {
-      setToast({ message: 'Подписка отменена', type: 'success' })
+      setToast({ message: t('subCancelledMsg'), type: 'success' })
     }
   }
 
@@ -251,10 +325,10 @@ export default function ProfilePage() {
       .eq('seller_id', userId)
     if (error) {
       console.error(error)
-      alert('Ошибка возобновления подписки: ' + error.message)
+      alert(t('resumeSubErrorPrefix') + error.message)
       setSubscription((prev) => ({ ...prev, cancel_at_period_end: true }))
     } else {
-      setToast({ message: 'Подписка возобновлена', type: 'success' })
+      setToast({ message: t('subResumedMsg'), type: 'success' })
     }
   }
 
@@ -265,7 +339,7 @@ export default function ProfilePage() {
     const { error } = await supabase.from('sellers').update({ notifications_enabled: next }).eq('id', userId)
     if (error) {
       console.error(error)
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' })
+      setToast({ message: t('saveErrorGeneric'), type: 'error' })
       setSeller((prev) => (prev ? { ...prev, notifications_enabled: !next } : prev))
     }
   }
@@ -273,11 +347,11 @@ export default function ProfilePage() {
   async function changePassword() {
     setPasswordMsg(null)
     if (newPassword.length < 6) {
-      setPasswordMsg({ type: 'error', text: 'Пароль должен быть не короче 6 символов' })
+      setPasswordMsg({ type: 'error', text: t('passwordTooShortMsg') })
       return
     }
     if (newPassword !== confirmPassword) {
-      setPasswordMsg({ type: 'error', text: 'Пароли не совпадают' })
+      setPasswordMsg({ type: 'error', text: t('passwordsMismatchMsg') })
       return
     }
     setChangingPassword(true)
@@ -285,10 +359,10 @@ export default function ProfilePage() {
     setChangingPassword(false)
     if (error) {
       console.error(error)
-      setPasswordMsg({ type: 'error', text: 'Ошибка: ' + error.message })
+      setPasswordMsg({ type: 'error', text: t('errorPrefix') + error.message })
       return
     }
-    setPasswordMsg({ type: 'success', text: 'Пароль успешно изменён' })
+    setPasswordMsg({ type: 'success', text: t('passwordChangedMsg') })
     setNewPassword('')
     setConfirmPassword('')
   }
@@ -301,19 +375,19 @@ export default function ProfilePage() {
     setUpgrading(false)
     if (error) {
       console.error(error)
-      alert('Ошибка оплаты: ' + error.message)
+      alert(t('paymentErrorPrefix') + error.message)
       return
     }
 
     const [{ data: subData }, { data: paymentsData }] = await Promise.all([
       supabase
         .from('seller_subscriptions')
-        .select('plan, expires_at, cancel_at_period_end')
+        .select('plan, expires_at, cancel_at_period_end, trial_ends_at')
         .eq('seller_id', userId)
         .maybeSingle(),
       supabase
         .from('payment_history')
-        .select('*')
+        .select('id, amount, plan, status, created_at')
         .eq('seller_id', userId)
         .order('created_at', { ascending: false }),
     ])
@@ -322,6 +396,7 @@ export default function ProfilePage() {
       plan: subData?.plan === 'pro' ? 'pro' : 'free',
       expires_at: subData?.expires_at ?? null,
       cancel_at_period_end: subData?.cancel_at_period_end ?? false,
+      trial_ends_at: subData?.trial_ends_at ?? null,
     })
     setPayments((paymentsData || []) as PaymentRow[])
     setShowUpgradeModal(false)
@@ -330,27 +405,83 @@ export default function ProfilePage() {
   }
 
   function confirmDeleteAccount() {
-    alert('Функция удаления аккаунта скоро будет доступна. Обратитесь в поддержку.')
+    alert(t('deleteAccountComingSoonMsg'))
     setShowDeleteModal(false)
     setDeleteConfirmText('')
   }
 
+  // Демпинг — единственная платная функция (см. /demping). Статус triala/active/expired
+  // считается той же логикой, что и getSubscriptionState в lib/limits.ts.
+  const subState = computeSubscriptionStatus({
+    expiresAt: subscription.expires_at,
+    trialEndsAt: subscription.trial_ends_at,
+  })
+  const SUB_STATUS_LABEL: Record<typeof subState.status, string> = {
+    trial: t('subStatusTrial'),
+    active: t('subStatusActive'),
+    expired: t('subStatusExpired'),
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
+      <div className="max-w-3xl mx-auto px-8 pt-6">
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('brandingTitle')}</h2>
+          <div className="flex items-center gap-4">
+            <div className="w-24 h-24 shrink-0 rounded-xl border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50">
+              {seller?.company_logo_url ? (
+                <img
+                  src={seller.company_logo_url}
+                  alt={t('companyLogoAlt')}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-1 text-gray-300">
+                  <ImageIcon size={24} />
+                  <span className="text-[10px] text-gray-400 text-center px-1">{t('logoNotUploadedLabel')}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <label className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all cursor-pointer">
+                {uploadingLogo ? t('uploadingLabel') : t('uploadLogoBtn')}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={uploadLogo}
+                  className="hidden"
+                  disabled={uploadingLogo}
+                />
+              </label>
+              {seller?.company_logo_url && (
+                <button
+                  onClick={deleteLogo}
+                  disabled={uploadingLogo}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition-all inline-flex items-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  {t('deleteLogoBtn')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <header className="bg-white border-b border-gray-100 px-8 py-5">
         <Link
           href="/dashboard"
           className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800 mb-2"
         >
           <ArrowLeft size={16} />
-          Назад
+          {t('back')}
         </Link>
         <div className="flex items-center gap-4">
           <div className="relative w-14 h-14 shrink-0">
             {seller?.avatar_url && !avatarBroken ? (
               <img
                 src={seller.avatar_url}
-                alt={seller.full_name || 'Аватар'}
+                alt={seller.full_name || t('avatarAlt')}
                 onError={() => setAvatarBroken(true)}
                 className="w-14 h-14 rounded-full object-cover"
               />
@@ -361,7 +492,7 @@ export default function ProfilePage() {
             )}
             <label
               className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-800 cursor-pointer shadow-sm"
-              title="Изменить фото"
+              title={t('changePhotoTitle')}
             >
               <Camera size={12} />
               <input
@@ -374,8 +505,8 @@ export default function ProfilePage() {
             </label>
           </div>
           <div>
-            <h1 className="text-2xl font-black text-gray-900 tracking-tight">Профиль</h1>
-            <p className="text-sm text-gray-400 mt-0.5">Данные вашего аккаунта и подписки</p>
+            <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('profileTitle')}</h1>
+            <p className="text-sm text-gray-400 mt-0.5">{t('profileSubtitle')}</p>
           </div>
         </div>
       </header>
@@ -384,12 +515,12 @@ export default function ProfilePage() {
         {/* Личные данные */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-gray-900">Личные данные</h2>
+            <h2 className="text-sm font-bold text-gray-900">{t('personalDataTitle')}</h2>
             {!loading && !isEditing && (
               <button
                 onClick={startEditing}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all"
-                title="Редактировать"
+                title={t('edit')}
               >
                 <Pencil size={16} />
               </button>
@@ -397,7 +528,7 @@ export default function ProfilePage() {
           </div>
 
           {loading ? (
-            <p className="text-gray-400 text-sm">Загрузка…</p>
+            <p className="text-gray-400 text-sm">{t('loading')}</p>
           ) : isEditing ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -418,7 +549,7 @@ export default function ProfilePage() {
                     readOnly
                     className="w-full border border-gray-100 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed"
                   />
-                  <p className="text-xs text-gray-400 mt-1">Email нельзя изменить</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('emailCannotChangeMsg')}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -427,14 +558,14 @@ export default function ProfilePage() {
                   disabled={savingProfile}
                   className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
                 >
-                  {savingProfile ? 'Сохраняю…' : 'Сохранить'}
+                  {savingProfile ? t('saving') : t('save')}
                 </button>
                 <button
                   onClick={cancelEditing}
                   disabled={savingProfile}
                   className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
                 >
-                  Отмена
+                  {t('cancel')}
                 </button>
               </div>
             </div>
@@ -456,100 +587,108 @@ export default function ProfilePage() {
 
         {/* Подписка */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">Подписка</h2>
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('subscriptionTitle')}</h2>
 
           <div className="flex items-center gap-3 mb-2">
             <span
               className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-black uppercase tracking-wide ${
-                subscription.plan === 'pro'
-                  ? 'bg-gradient-to-r from-amber-400 to-red-500 text-white shadow-sm shadow-amber-200'
-                  : 'bg-gray-100 text-gray-500'
+                subState.status === 'expired'
+                  ? 'bg-gray-100 text-gray-500'
+                  : 'bg-gradient-to-r from-amber-400 to-red-500 text-white shadow-sm shadow-amber-200'
               }`}
             >
-              {subscription.plan === 'pro' && <Crown size={14} />}
-              {subscription.plan === 'pro' ? 'Pro' : 'Free'}
+              {subState.status !== 'expired' && <Crown size={14} />}
+              {SUB_STATUS_LABEL[subState.status]}
             </span>
-            {subscription.plan === 'pro' && (
-              <span className="text-sm text-gray-400">Действует до {formatDate(subscription.expires_at)}</span>
+            {subState.status === 'trial' && (
+              <span className="text-sm text-gray-400">
+                {t('daysLeftLabel')
+                  .replace('{days}', String(subState.daysLeft))
+                  .replace('{unit}', t(subState.daysLeft === 1 ? 'dayWordOne' : 'dayWordMany'))}
+              </span>
+            )}
+            {subState.status === 'active' && (
+              <span className="text-sm text-gray-400">
+                {t('activeUntilLabel').replace('{date}', formatDate(subscription.expires_at, locale))}
+              </span>
             )}
           </div>
 
-          {subscription.plan === 'pro' && subscription.cancel_at_period_end && (
+          {subscription.plan === 'pro' && subscription.cancel_at_period_end && subState.status !== 'expired' && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4 mt-3">
-              Подписка отменена, действует до {formatDate(subscription.expires_at)}
+              {t('subCancelledUntilMsg').replace('{date}', formatDate(subscription.expires_at, locale))}
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5 mt-4">
-            <div className="rounded-xl border border-gray-100 p-4">
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Free</p>
-              <p className="text-sm text-gray-700">Базовые функции</p>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-              <p className="text-xs font-bold text-amber-600 uppercase tracking-wide mb-2 flex items-center gap-1">
-                <Check size={13} /> Pro
-              </p>
-              <p className="text-sm text-gray-700">Все функции без ограничений</p>
-            </div>
+          <div className="rounded-xl border border-gray-100 p-4 mb-5 mt-4">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">{t('planIncludesTitle')}</p>
+            <ul className="text-sm text-gray-700 space-y-1">
+              <li>• {t('planFeatureDemping')}</li>
+              <li>• {t('planFeatureAutoSchedule')}</li>
+              <li>• {t('planFeatureKaspiPublish')}</li>
+            </ul>
+            <p className="text-sm font-semibold text-gray-900 mt-3">{t('pricePerMonthLabel')}</p>
           </div>
 
           {upgradeSuccess && (
             <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 mb-4">
-              Подписка Pro активирована!
+              {t('subActivatedMsg')}
             </div>
           )}
 
-          {subscription.plan === 'free' && (
-            <button
-              onClick={() => setShowUpgradeModal(true)}
-              className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
-            >
-              Улучшить до Pro
-            </button>
+          {subState.status === 'expired' && (
+            <div>
+              <button
+                onClick={() => setShowUpgradeModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
+              >
+                {t('extendSubscriptionBtn')}
+              </button>
+            </div>
           )}
 
-          {subscription.plan === 'pro' && !subscription.cancel_at_period_end && (
+          {subState.status !== 'expired' && !subscription.cancel_at_period_end && (
             <button
               onClick={cancelSubscription}
               className="px-4 py-2.5 rounded-xl border border-red-300 text-red-600 text-sm font-semibold hover:bg-red-50 transition-all"
             >
-              Отменить подписку
+              {t('cancelSubBtn')}
             </button>
           )}
 
-          {subscription.plan === 'pro' && subscription.cancel_at_period_end && (
+          {subState.status !== 'expired' && subscription.cancel_at_period_end && (
             <button
               onClick={resumeSubscription}
               className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
             >
-              Возобновить подписку
+              {t('resumeSubBtn')}
             </button>
           )}
         </div>
 
         {/* История платежей */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">История платежей</h2>
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('paymentHistoryTitle')}</h2>
           {payments.length === 0 ? (
-            <p className="text-gray-400 text-sm">Платежей пока нет</p>
+            <p className="text-gray-400 text-sm">{t('noPaymentsMsg')}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left border-b border-gray-100 text-gray-400 text-xs uppercase">
-                    <th className="py-2 pr-4">Дата</th>
-                    <th className="py-2 pr-4">План</th>
-                    <th className="py-2 pr-4">Сумма</th>
-                    <th className="py-2 pr-4">Статус</th>
+                    <th className="py-2 pr-4">{t('date')}</th>
+                    <th className="py-2 pr-4">{t('planColHeader')}</th>
+                    <th className="py-2 pr-4">{t('amountColHeader')}</th>
+                    <th className="py-2 pr-4">{t('status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payments.map((p) => (
                     <tr key={p.id} className="border-b border-gray-50">
-                      <td className="py-2.5 pr-4 text-gray-500">{formatDate(p.created_at)}</td>
+                      <td className="py-2.5 pr-4 text-gray-500">{formatDate(p.created_at, locale)}</td>
                       <td className="py-2.5 pr-4 font-semibold text-gray-900 capitalize">{p.plan}</td>
                       <td className="py-2.5 pr-4 font-semibold text-gray-900">
-                        {Number(p.amount).toLocaleString('ru-RU')} ₸
+                        {Number(p.amount).toLocaleString(locale)} ₸
                       </td>
                       <td className="py-2.5 pr-4">
                         <span
@@ -572,9 +711,9 @@ export default function ProfilePage() {
 
         {/* Настройки */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">Настройки</h2>
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('settingsTitle')}</h2>
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-700">Получать уведомления о заказах</p>
+            <p className="text-sm text-gray-700">{t('notificationsToggleLabel')}</p>
             <button
               onClick={toggleNotifications}
               disabled={!seller}
@@ -593,10 +732,10 @@ export default function ProfilePage() {
 
         {/* Безопасность */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">Безопасность</h2>
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('securityTitle')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div>
-              <p className="text-xs text-gray-400 mb-1">Новый пароль</p>
+              <p className="text-xs text-gray-400 mb-1">{t('newPasswordLabel')}</p>
               <input
                 type="password"
                 value={newPassword}
@@ -605,7 +744,7 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-1">Подтверждение пароля</p>
+              <p className="text-xs text-gray-400 mb-1">{t('confirmPasswordLabel')}</p>
               <input
                 type="password"
                 value={confirmPassword}
@@ -624,19 +763,19 @@ export default function ProfilePage() {
             disabled={changingPassword}
             className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
           >
-            {changingPassword ? 'Сохраняю…' : 'Сменить пароль'}
+            {changingPassword ? t('saving') : t('changePasswordBtn')}
           </button>
         </div>
 
         {/* Опасная зона */}
         <div className="bg-red-50 rounded-2xl border border-red-200 p-6 shadow-sm mb-6">
-          <h2 className="text-sm font-bold text-red-700 mb-2">Опасная зона</h2>
-          <p className="text-sm text-red-600 mb-4">Удаление аккаунта необратимо и приведёт к потере всех данных.</p>
+          <h2 className="text-sm font-bold text-red-700 mb-2">{t('dangerZoneTitle')}</h2>
+          <p className="text-sm text-red-600 mb-4">{t('deleteAccountWarning')}</p>
           <button
             onClick={() => setShowDeleteModal(true)}
             className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
           >
-            Удалить аккаунт
+            {t('deleteAccountBtn')}
           </button>
         </div>
 
@@ -646,7 +785,7 @@ export default function ProfilePage() {
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 transition-all"
         >
           <LogOut size={16} />
-          Выйти
+          {t('logoutBtn')}
         </button>
       </main>
 
@@ -662,9 +801,9 @@ export default function ProfilePage() {
             className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-bold mb-2 text-gray-900">Удалить аккаунт</h3>
+            <h3 className="font-bold mb-2 text-gray-900">{t('deleteAccountBtn')}</h3>
             <p className="text-sm text-gray-600 mb-4">
-              Это действие необратимо. Чтобы подтвердить, введите слово <b>DELETE</b> ниже.
+              {t('deleteAccountModalText')}
             </p>
             <input
               value={deleteConfirmText}
@@ -678,7 +817,7 @@ export default function ProfilePage() {
                 disabled={deleteConfirmText !== 'DELETE'}
                 className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
-                Удалить аккаунт
+                {t('deleteAccountBtn')}
               </button>
               <button
                 onClick={() => {
@@ -687,7 +826,7 @@ export default function ProfilePage() {
                 }}
                 className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
               >
-                Отмена
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -703,10 +842,9 @@ export default function ProfilePage() {
             className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="font-bold mb-2 text-gray-900">Улучшить до Pro</h3>
+            <h3 className="font-bold mb-2 text-gray-900">{t('upgradeModalTitle')}</h3>
             <p className="text-sm text-gray-600 mb-4">
-              Оплата подписки Pro — 10 000 ₸/мес. Переведите сумму на Kaspi по номеру +7 XXX XXX XX XX с комментарием
-              вашим email, затем нажмите «Я оплатил».
+              {t('upgradeModalText')}
             </p>
             <div className="flex gap-2">
               <button
@@ -714,16 +852,17 @@ export default function ProfilePage() {
                 disabled={upgrading}
                 className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
               >
-                {upgrading ? 'Проверяю…' : 'Я оплатил'}
+                {upgrading ? t('checkingLabel') : t('iPaidBtn')}
               </button>
               <button
                 onClick={() => setShowUpgradeModal(false)}
                 disabled={upgrading}
                 className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
               >
-                Отмена
+                {t('cancel')}
               </button>
             </div>
+            <p className="text-xs text-gray-400 mt-3">{t('manualPaymentNoteMsg')}</p>
           </div>
         </div>
       )}

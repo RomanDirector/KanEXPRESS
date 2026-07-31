@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { useLang } from '@/lib/i18n';
-import { checkLimit } from '@/lib/limits';
+import { useLang, localeTag } from '@/lib/i18n';
+import { checkLimit, formatLimit, getSubscriptionState, type SubscriptionState } from '@/lib/limits';
 import { Toast } from '@/components/Toast';
 
 interface Rule {
   id: string;
   product_name: string;
+  sku: string | null;
   current_price: number;
   min_price: number;
   max_price: number;
@@ -33,7 +34,8 @@ interface HistoryRow {
 }
 
 export default function DempingPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const locale = localeTag(lang);
   const [tab, setTab] = useState<'rules' | 'history'>('rules');
   const [rules, setRules] = useState<Rule[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
@@ -41,8 +43,13 @@ export default function DempingPage() {
   const [showCronInfo, setShowCronInfo] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
+  const [sellerId, setSellerId] = useState<string | null>(null);
+  const [autoScheduleEnabled, setAutoScheduleEnabled] = useState(false);
+  const [savingAutoSchedule, setSavingAutoSchedule] = useState(false);
+  const [subState, setSubState] = useState<SubscriptionState | null>(null);
 
   const [newName, setNewName] = useState('');
+  const [newSku, setNewSku] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newMin, setNewMin] = useState('');
   const [newMax, setNewMax] = useState('');
@@ -58,35 +65,97 @@ export default function DempingPage() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: r, error: rErr }, { data: h, error: hErr }] = await Promise.all([
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    setSellerId(user?.id ?? null);
+
+    if (!user) {
+      setRules([]);
+      setHistory([]);
+      setAutoScheduleEnabled(false);
+      setSubState(null);
+      setLoading(false);
+      return;
+    }
+
+    const [{ data: r, error: rErr }, settingsResult] = await Promise.all([
       supabase
         .from('demping_rules')
         .select(
-          'id, product_name, current_price, min_price, max_price, step, position, image_url, is_active, competitor_price, follow_competitor, follow_step'
+          'id, product_name, sku, current_price, min_price, max_price, step, position, image_url, is_active, competitor_price, follow_competitor, follow_step'
         )
+        .eq('seller_id', user.id)
         .order('product_name'),
       supabase
-        .from('demping_history')
-        .select('id, product_name, old_price, new_price, triggered_by, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200),
+        .from('demping_settings')
+        .select('auto_enabled')
+        .eq('seller_id', user.id)
+        .maybeSingle(),
     ]);
     if (rErr) {
       console.error(rErr);
-      setToast({ message: 'Не удалось загрузить данные: ' + rErr.message, type: 'error' });
+      setToast({ message: t('loadErrorPrefix') + rErr.message, type: 'error' });
     }
-    if (hErr) console.error(hErr);
-    setRules((r || []) as Rule[]);
-    setHistory((h || []) as HistoryRow[]);
+    if (settingsResult.error) console.error(settingsResult.error);
+    const ruleRows = (r || []) as Rule[];
+    setRules(ruleRows);
+    setAutoScheduleEnabled(Boolean(settingsResult.data?.auto_enabled));
+    setSubState(await getSubscriptionState(user.id));
+
+    // demping_history не хранит seller_id — своя история определяется через
+    // принадлежность rule_id правилам текущего продавца.
+    const ruleIds = ruleRows.map((rule) => rule.id);
+    if (ruleIds.length === 0) {
+      setHistory([]);
+    } else {
+      const { data: h, error: hErr } = await supabase
+        .from('demping_history')
+        .select('id, product_name, old_price, new_price, triggered_by, created_at')
+        .in('rule_id', ruleIds)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (hErr) console.error(hErr);
+      setHistory((h || []) as HistoryRow[]);
+    }
     setLoading(false);
+  }
+
+  async function toggleAutoSchedule() {
+    if (!sellerId) return;
+    const next = !autoScheduleEnabled;
+    setSavingAutoSchedule(true);
+    setAutoScheduleEnabled(next);
+    const { error } = await supabase
+      .from('demping_settings')
+      .upsert({ seller_id: sellerId, auto_enabled: next }, { onConflict: 'seller_id' });
+    setSavingAutoSchedule(false);
+    if (error) {
+      console.error(error);
+      setAutoScheduleEnabled(!next);
+      setToast({ message: t('saveChangesErrorPrefix') + error.message, type: 'error' });
+      return;
+    }
+    setToast({
+      message: next ? t('autoScheduleOnMsg') : t('autoScheduleOffMsg'),
+      type: 'success',
+    });
   }
 
   async function addRule() {
     if (!newName.trim() || !newPrice || !newMin || !newMax || !newStep) {
       setToast({
-        message: 'Заполните обязательные поля: Товар, Текущая цена, Мин. цена, Макс. цена, Шаг',
+        message: t('requiredFieldsMsg'),
         type: 'error',
       });
+      return;
+    }
+    if (Number(newMin) >= Number(newMax)) {
+      setToast({ message: t('minMaxPriceErrorMsg'), type: 'error' });
+      return;
+    }
+    if (newFollowCompetitor && Number(newFollowStep) <= 0) {
+      setToast({ message: t('followStepErrorMsg'), type: 'error' });
       return;
     }
     const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -94,7 +163,7 @@ export default function DempingPage() {
     if (userErr || !sellerId) {
       console.error('addRule: failed to resolve current user', userErr);
       setToast({
-        message: 'Не удалось определить пользователя: ' + (userErr?.message || 'сессия истекла, войдите снова'),
+        message: t('resolveUserErrorPrefix') + (userErr?.message || t('sessionExpiredMsg')),
         type: 'error',
       });
       return;
@@ -105,13 +174,14 @@ export default function DempingPage() {
       console.error('addRule: checkLimit failed, failing open', limitErr);
     }
     if (!allowed) {
-      alert(`Достигнут лимит ${max} товаров на плане Free. Улучшите план на странице Профиль.`);
+      alert(t('limitReachedMsg').replace('{max}', formatLimit(max)));
       return;
     }
 
     const { error } = await supabase.from('demping_rules').insert({
       seller_id: sellerId,
       product_name: newName.trim(),
+      sku: newSku.trim() || null,
       current_price: Number(newPrice),
       min_price: Number(newMin),
       max_price: Number(newMax),
@@ -125,6 +195,7 @@ export default function DempingPage() {
     if (error) alert(t('errorPrefix') + error.message);
     else {
       setNewName('');
+      setNewSku('');
       setNewPrice('');
       setNewMin('');
       setNewMax('');
@@ -133,7 +204,7 @@ export default function DempingPage() {
       setNewCompetitorPrice('');
       setNewFollowCompetitor(false);
       setNewFollowStep('1');
-      setToast({ message: 'Товар успешно добавлен', type: 'success' });
+      setToast({ message: t('ruleAddedMsg'), type: 'success' });
       loadAll();
     }
   }
@@ -142,28 +213,66 @@ export default function DempingPage() {
     const { error } = await supabase
       .from('demping_rules')
       .update({ is_active: !rule.is_active })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     }
     loadAll();
   }
 
+  function priceChangeToast(oldPrice: number, newPrice: number) {
+    setToast({
+      message: t('priceDecreasedMsg')
+        .replace('{old}', oldPrice.toLocaleString(locale))
+        .replace('{new}', newPrice.toLocaleString(locale)),
+      type: 'success',
+    });
+  }
+
+  // Публикация на Kaspi — через серверный роут (токен туда не попадает на клиент).
+  // Локальный демпинг не должен ломаться из-за недоступности Kaspi: цена в БД уже изменена к этому моменту.
+  async function publishToKaspi(ruleId: string) {
+    try {
+      const res = await fetch('/api/kaspi/price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setToast({
+          message: t('kaspiPublishFailedPrefix') + (body.error || t('serverErrorGeneric')),
+          type: 'error',
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      setToast({
+        message: t('kaspiNoConnectionMsg'),
+        type: 'error',
+      });
+    }
+  }
+
   async function decreaseOnce(rule: Rule) {
     if (rule.current_price <= rule.min_price || !rule.is_active) return;
-    const newPriceVal = Math.max(rule.current_price - rule.step, rule.min_price);
+    const newPriceVal = Math.min(Math.max(rule.current_price - rule.step, rule.min_price), rule.max_price);
 
     const { error: e1 } = await supabase
       .from('demping_rules')
       .update({ current_price: newPriceVal })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
 
     if (e1) {
       console.error(e1);
       alert(t('errorPrefix') + e1.message);
       return;
     }
+
+    priceChangeToast(rule.current_price, newPriceVal);
 
     const { error: e2 } = await supabase.from('demping_history').insert({
       rule_id: rule.id,
@@ -174,29 +283,35 @@ export default function DempingPage() {
     });
     if (e2) {
       console.error(e2);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     }
 
+    publishToKaspi(rule.id);
     loadAll();
   }
 
   // Если наша цена не ниже конкурента — подтягиваем её вниз на follow_step, но не ниже min_price.
+  // is_active === false блокирует автоследование за конкурентом так же, как блокирует decreaseOnce.
   async function recalcByCompetitor(rule: Rule) {
+    if (!rule.is_active) return;
     if (!rule.follow_competitor || rule.competitor_price == null) return;
     if (rule.current_price < rule.competitor_price) return;
 
-    const newPriceVal = Math.max(rule.competitor_price - rule.follow_step, rule.min_price);
+    const newPriceVal = Math.min(Math.max(rule.competitor_price - rule.follow_step, rule.min_price), rule.max_price);
     if (newPriceVal === rule.current_price) return;
 
     const { error: e1 } = await supabase
       .from('demping_rules')
       .update({ current_price: newPriceVal })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (e1) {
       console.error(e1);
       alert(t('errorPrefix') + e1.message);
       return;
     }
+
+    priceChangeToast(rule.current_price, newPriceVal);
 
     const { error: e2 } = await supabase.from('demping_history').insert({
       rule_id: rule.id,
@@ -207,12 +322,30 @@ export default function DempingPage() {
     });
     if (e2) {
       console.error(e2);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     }
+
+    publishToKaspi(rule.id);
   }
 
   async function recalcByCompetitorBtn(rule: Rule) {
     await recalcByCompetitor(rule);
+    loadAll();
+  }
+
+  async function updateSku(rule: Rule, value: string) {
+    const sku = value.trim() || null;
+    if (sku === (rule.sku ?? null)) return;
+    const { error } = await supabase
+      .from('demping_rules')
+      .update({ sku })
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
+    if (error) {
+      console.error(error);
+      alert(t('errorPrefix') + error.message);
+      return;
+    }
     loadAll();
   }
 
@@ -221,7 +354,8 @@ export default function DempingPage() {
     const { error } = await supabase
       .from('demping_rules')
       .update({ competitor_price: num })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       console.error(error);
       alert(t('errorPrefix') + error.message);
@@ -235,23 +369,30 @@ export default function DempingPage() {
     const { error } = await supabase
       .from('demping_rules')
       .update({ follow_competitor: !rule.follow_competitor })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     }
     loadAll();
   }
 
   async function updateFollowStep(rule: Rule, value: string) {
-    const num = Number(value) || 1;
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+      setToast({ message: t('followStepErrorMsg'), type: 'error' });
+      loadAll();
+      return;
+    }
     const { error } = await supabase
       .from('demping_rules')
       .update({ follow_step: num })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     }
     loadAll();
   }
@@ -270,7 +411,7 @@ export default function DempingPage() {
 
     if (error) {
       console.error(error);
-      setToast({ message: 'Ошибка загрузки: ' + error.message, type: 'error' });
+      setToast({ message: t('uploadErrorPrefix') + error.message, type: 'error' });
       setUploadingPhotoId(null);
       e.target.value = '';
       return;
@@ -286,16 +427,17 @@ export default function DempingPage() {
     const { error: updateError } = await supabase
       .from('demping_rules')
       .update({ image_url: pub.publicUrl })
-      .eq('id', rule.id);
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
 
     if (updateError) {
       console.error(updateError);
-      setToast({ message: 'Не удалось сохранить фото: ' + updateError.message, type: 'error' });
+      setToast({ message: t('photoSaveErrorPrefix') + updateError.message, type: 'error' });
       setRules((prev) =>
         prev.map((r) => (r.id === rule.id ? { ...r, image_url: rule.image_url } : r))
       );
     } else {
-      setToast({ message: 'Фото успешно загружено', type: 'success' });
+      setToast({ message: t('photoUploadedMsg'), type: 'success' });
     }
 
     setUploadingPhotoId(null);
@@ -304,20 +446,70 @@ export default function DempingPage() {
 
   async function deleteRule(rule: Rule) {
     if (!confirm(t('deleteRuleConfirm').replace('{name}', rule.product_name))) return;
-    const { error } = await supabase.from('demping_rules').delete().eq('id', rule.id);
+    const { error } = await supabase
+      .from('demping_rules')
+      .delete()
+      .eq('id', rule.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     } else {
-      setToast({ message: 'Товар успешно удалён', type: 'success' });
+      setToast({ message: t('ruleDeletedMsg'), type: 'success' });
     }
     loadAll();
   }
+
+  const isExpired = subState?.status === 'expired';
 
   return (
     <div className="p-4">
       <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
         ⚠️ <b>{t('dempingBannerBold')}</b> {t('dempingBannerRest')}
+      </div>
+
+      {subState?.status === 'trial' && (
+        <div className="mb-4 rounded-xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-800">
+          {t('trialBannerPrefix')} {subState.daysLeft} {t(subState.daysLeft === 1 ? 'dayWordOne' : 'dayWordMany')}
+          {t('trialBannerRest')}
+        </div>
+      )}
+
+      {isExpired && (
+        <div className="mb-4 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-800 flex flex-wrap items-center justify-between gap-3">
+          <span className="font-semibold">
+            {t('expiredBannerMsg')}
+          </span>
+          <Link
+            href="/profile"
+            className="shrink-0 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+          >
+            {t('extendSubscriptionBtn')}
+          </Link>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border p-4 mb-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{t('autoScheduleTitle')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {autoScheduleEnabled ? t('on') : t('off')}
+          </p>
+        </div>
+        <button
+          onClick={toggleAutoSchedule}
+          disabled={savingAutoSchedule || !sellerId || isExpired}
+          title={isExpired ? t('subscriptionExpiredTooltip') : undefined}
+          className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-50 ${
+            autoScheduleEnabled ? 'bg-blue-600' : 'bg-gray-200'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform shadow ${
+              autoScheduleEnabled ? 'translate-x-5' : ''
+            }`}
+          />
+        </button>
       </div>
 
       <div className="flex items-center justify-between mb-4">
@@ -369,6 +561,15 @@ export default function DempingPage() {
                 onChange={(e) => setNewName(e.target.value)}
                 className="border rounded px-2 py-1.5 w-48"
                 placeholder={t('productNamePlaceholder')}
+              />
+            </label>
+            <label className="text-sm">
+              <span className="block text-xs text-gray-500">{t('skuLabel')}</span>
+              <input
+                value={newSku}
+                onChange={(e) => setNewSku(e.target.value)}
+                className="border rounded px-2 py-1.5 w-32"
+                placeholder={t('skuPlaceholder')}
               />
             </label>
             <label className="text-sm">
@@ -459,6 +660,7 @@ export default function DempingPage() {
                 <tr className="text-left border-b bg-gray-50">
                   <th className="p-3">{t('photoHeader')}</th>
                   <th className="p-3">{t('productHeader')}</th>
+                  <th className="p-3">{t('skuHeader')}</th>
                   <th className="p-3">{t('currentPriceHeader')}</th>
                   <th className="p-3">{t('minPriceHeader')}</th>
                   <th className="p-3">{t('maxPriceHeader')}</th>
@@ -474,14 +676,14 @@ export default function DempingPage() {
               <tbody>
                 {loading && (
                   <tr>
-                    <td colSpan={12} className="p-6 text-center text-gray-500">
+                    <td colSpan={13} className="p-6 text-center text-gray-500">
                       {t('loading')}
                     </td>
                   </tr>
                 )}
                 {!loading && rules.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="p-6 text-center text-gray-500">
+                    <td colSpan={13} className="p-6 text-center text-gray-500">
                       {t('noRules')}
                     </td>
                   </tr>
@@ -494,7 +696,7 @@ export default function DempingPage() {
                       <td className="p-3">
                         <label
                           className="relative block w-10 h-10 rounded border cursor-pointer group overflow-hidden"
-                          title={r.image_url ? 'Заменить фото' : 'Загрузить фото'}
+                          title={r.image_url ? t('replacePhoto') : t('uploadPhotoBtn')}
                         >
                           {r.image_url ? (
                             <img
@@ -522,9 +724,17 @@ export default function DempingPage() {
                         </label>
                       </td>
                       <td className="p-3 font-semibold">{r.product_name}</td>
-                      <td className="p-3">{r.current_price.toLocaleString('ru-RU')} ₸</td>
-                      <td className="p-3">{r.min_price.toLocaleString('ru-RU')} ₸</td>
-                      <td className="p-3">{r.max_price.toLocaleString('ru-RU')} ₸</td>
+                      <td className="p-3">
+                        <input
+                          defaultValue={r.sku ?? ''}
+                          onBlur={(e) => updateSku(r, e.target.value)}
+                          placeholder={t('skuPlaceholder')}
+                          className="border rounded px-2 py-1 w-28"
+                        />
+                      </td>
+                      <td className="p-3">{r.current_price.toLocaleString(locale)} ₸</td>
+                      <td className="p-3">{r.min_price.toLocaleString(locale)} ₸</td>
+                      <td className="p-3">{r.max_price.toLocaleString(locale)} ₸</td>
                       <td className="p-3">{r.position || '—'}</td>
                       <td className="p-3">
                         <input
@@ -584,14 +794,16 @@ export default function DempingPage() {
                       <td className="p-3 flex gap-2">
                         <button
                           onClick={() => decreaseOnce(r)}
-                          disabled={stepDisabled}
+                          disabled={stepDisabled || isExpired}
+                          title={isExpired ? t('subscriptionExpiredTooltip') : undefined}
                           className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
                         >
                           {t('decreaseStepBtn')}
                         </button>
                         <button
                           onClick={() => recalcByCompetitorBtn(r)}
-                          disabled={!r.follow_competitor || r.competitor_price == null}
+                          disabled={!r.follow_competitor || r.competitor_price == null || !r.is_active || isExpired}
+                          title={isExpired ? t('subscriptionExpiredTooltip') : undefined}
                           className="px-3 py-1 rounded bg-purple-600 text-white text-xs font-semibold disabled:opacity-40"
                         >
                           {t('recalcByCompetitorBtn')}
@@ -635,9 +847,9 @@ export default function DempingPage() {
               {history.map((h) => (
                 <tr key={h.id} className="border-b hover:bg-gray-50">
                   <td className="p-3 font-semibold">{h.product_name || '—'}</td>
-                  <td className="p-3">{h.old_price.toLocaleString('ru-RU')} ₸</td>
+                  <td className="p-3">{h.old_price.toLocaleString(locale)} ₸</td>
                   <td className="p-3 text-red-600 font-semibold">
-                    {h.new_price.toLocaleString('ru-RU')} ₸
+                    {h.new_price.toLocaleString(locale)} ₸
                   </td>
                   <td className="p-3">
                     {h.triggered_by === 'auto'
@@ -647,7 +859,7 @@ export default function DempingPage() {
                       : t('manualLabel')}
                   </td>
                   <td className="p-3 text-gray-500">
-                    {new Date(h.created_at).toLocaleString('ru-RU')}
+                    {new Date(h.created_at).toLocaleString(locale)}
                   </td>
                 </tr>
               ))}
@@ -673,14 +885,21 @@ export default function DempingPage() {
   $$
   insert into demping_history
     (rule_id, product_name, old_price, new_price, triggered_by)
-  select id, product_name, current_price,
-         greatest(current_price - step, min_price), 'auto'
-  from demping_rules
-  where is_active = true and current_price > min_price;
+  select r.id, r.product_name, r.current_price,
+         least(greatest(r.current_price - r.step, r.min_price), r.max_price), 'auto'
+  from demping_rules r
+  join demping_settings s on s.seller_id = r.seller_id
+  where r.is_active = true
+    and s.auto_enabled = true
+    and r.current_price > r.min_price;
 
-  update demping_rules
-  set current_price = greatest(current_price - step, min_price)
-  where is_active = true and current_price > min_price;
+  update demping_rules r
+  set current_price = least(greatest(r.current_price - r.step, r.min_price), r.max_price)
+  from demping_settings s
+  where s.seller_id = r.seller_id
+    and r.is_active = true
+    and s.auto_enabled = true
+    and r.current_price > r.min_price;
   $$
 );`}
             </pre>

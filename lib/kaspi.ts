@@ -1,4 +1,6 @@
-const KASPI_API_BASE = 'https://kaspi.kz/shop/api/v2'
+import 'server-only'
+
+const KASPI_API_BASE = process.env.KASPI_API_BASE || 'https://kaspi.kz/shop/api/v2'
 
 // Ограничитель пагинации — предохранитель от бесконечного цикла, если Kaspi
 // вернёт некорректный meta.pageCount.
@@ -128,4 +130,83 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
     lat: order.deliveryAddress?.latitude ?? null,
     lng: order.deliveryAddress?.longitude ?? null,
   }
+}
+
+// --- Публикация цен через Kaspi Merchant API (KASPI_MERCHANT_TOKEN/KASPI_MERCHANT_ID) ---
+//
+// В отличие от fetchKaspiOrders выше (мультитенантно, токен каждого продавца из sellers.kaspi_token),
+// обновление цены пока рассчитано на один общий мерчант-токен из env. Если/когда демпинг станет
+// многотенантным по-настоящему, эту часть нужно будет перевести на per-seller токены так же, как orders.
+
+// ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: пути ниже — предположение по аналогии с /orders (JSON:API,
+// PATCH ресурса товара). Реальные эндпоинты и формат тела запроса для обновления цены нужно
+// сверить с документацией Kaspi Merchant API перед использованием в проде.
+const KASPI_PRICE_ENDPOINTS = {
+  product: (sku: string) => `/products/${encodeURIComponent(sku)}`,
+}
+
+function getToken(): string {
+  const token = process.env.KASPI_MERCHANT_TOKEN
+  if (!token) {
+    throw new Error('KASPI_MERCHANT_TOKEN не задан в переменных окружения')
+  }
+  return token
+}
+
+function getMerchantId(): string {
+  const id = process.env.KASPI_MERCHANT_ID
+  if (!id) {
+    throw new Error('KASPI_MERCHANT_ID не задан в переменных окружения')
+  }
+  return id
+}
+
+async function kaspiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken()
+
+  const res = await fetch(`${KASPI_API_BASE}${path}`, {
+    ...init,
+    headers: {
+      // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: заголовок авторизации может быть
+      // Authorization: Bearer <token> вместо X-Auth-Token — сверить с реальным API.
+      'X-Auth-Token': token,
+      'Content-Type': 'application/vnd.api+json',
+      ...(init.headers as Record<string, string> | undefined),
+    },
+    cache: 'no-store',
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Kaspi API ответил ${res.status}: ${body}`)
+  }
+
+  return res
+}
+
+export async function updateProductPrice(sku: string, price: number): Promise<void> {
+  const merchantId = getMerchantId()
+  // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: метод (PATCH) и форма тела запроса — предположение
+  // по JSON:API конвенции, сверить с реальным Merchant API перед продом.
+  await kaspiFetch(KASPI_PRICE_ENDPOINTS.product(sku), {
+    method: 'PATCH',
+    body: JSON.stringify({
+      data: {
+        type: 'products',
+        id: sku,
+        attributes: { price, merchantId },
+      },
+    }),
+  })
+}
+
+export async function getProductPrice(sku: string): Promise<number> {
+  const res = await kaspiFetch(KASPI_PRICE_ENDPOINTS.product(sku), { method: 'GET' })
+  const json = (await res.json()) as { data?: { attributes?: { price?: number } } }
+  // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: путь до цены в ответе (data.attributes.price) — предположение.
+  const price = json.data?.attributes?.price
+  if (typeof price !== 'number') {
+    throw new Error('Kaspi API вернул ответ без цены товара')
+  }
+  return price
 }

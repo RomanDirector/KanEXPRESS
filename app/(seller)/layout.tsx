@@ -6,13 +6,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine, Menu } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase } from '@/lib/supabase'
-import { SellerContext, type SellerProfile } from '@/lib/seller-context'
+import { SellerContext, useSeller, type SellerProfile } from '@/lib/seller-context'
 import { Spinner } from '@/components/ui/spinner'
 
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname()
   const router = useRouter()
   const { lang, setLang, t } = useLang()
+  const seller = useSeller()
 
   const navItems = [
     { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
@@ -27,7 +28,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
     { href: '/staff',           label: t('staff'),         icon: Users },
     { href: '/archive',         label: t('archive'),       icon: Archive },
     { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
-    { href: '/profile',         label: 'Профиль',          icon: User },
+    { href: '/profile',         label: t('profileNav'),   icon: User },
   ]
 
   const handleLogout = async () => {
@@ -50,10 +51,19 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
       >
       {/* Лого */}
       <div className="mb-6 px-2">
-        <span className="text-2xl font-black tracking-tight">
-          <span className="text-red-600">Kan</span>
-          <span className="text-gray-900">EXPRESS</span>
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-black tracking-tight">
+            <span className="text-red-600">Kan</span>
+            <span className="text-gray-900">EXPRESS</span>
+          </span>
+          {seller.company_logo_url && (
+            <img
+              src={seller.company_logo_url}
+              alt=""
+              className="h-7 object-contain"
+            />
+          )}
+        </div>
         <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wider">{t('sellerPanel')}</p>
       </div>
 
@@ -130,7 +140,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
       const { data: sellerProfile, error } = await supabase
         .from('sellers')
-        .select('id, full_name, phone, email, organization_name, organization_address, kaspi_token, kaspi_shop_id, created_at')
+        .select('id, full_name, phone, email, organization_name, organization_address, kaspi_token, kaspi_shop_id, created_at, company_logo_url')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -163,6 +173,25 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <SellerContext.Provider value={seller}>{children}</SellerContext.Provider>
 }
 
+function MobileHeader({ onOpen }: { onOpen: () => void }) {
+  const { t } = useLang()
+  return (
+    <header className="md:hidden flex items-center gap-3 bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-20">
+      <button
+        onClick={onOpen}
+        className="p-2 -ml-2 rounded-lg text-gray-600 hover:bg-gray-100"
+        aria-label={t('openMenuLabel')}
+      >
+        <Menu size={22} />
+      </button>
+      <span className="text-lg font-black tracking-tight">
+        <span className="text-red-600">Kan</span>
+        <span className="text-gray-900">EXPRESS</span>
+      </span>
+    </header>
+  )
+}
+
 export default function SellerLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -172,19 +201,7 @@ export default function SellerLayout({ children }: { children: React.ReactNode }
         <div className="flex min-h-screen bg-gray-50">
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
           <div className="flex-1 min-h-screen flex flex-col md:ml-60">
-            <header className="md:hidden flex items-center gap-3 bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-20">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-2 -ml-2 rounded-lg text-gray-600 hover:bg-gray-100"
-                aria-label="Открыть меню"
-              >
-                <Menu size={22} />
-              </button>
-              <span className="text-lg font-black tracking-tight">
-                <span className="text-red-600">Kan</span>
-                <span className="text-gray-900">EXPRESS</span>
-              </span>
-            </header>
+            <MobileHeader onOpen={() => setSidebarOpen(true)} />
             <main className="flex-1 bg-gray-50">
               {children}
             </main>

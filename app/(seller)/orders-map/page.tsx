@@ -37,9 +37,17 @@ export default function MapPage() {
   useEffect(() => {
     const fetchOrders = async () => {
       setLoading(true)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        setLoading(false)
+        return
+      }
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select('id, order_number, client_phone, client_address, status, price, courier_name, lat, lng, created_at')
+        .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
       if (error) console.error(error.message)
       else setOrders(data as Order[])

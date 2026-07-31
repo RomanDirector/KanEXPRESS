@@ -22,12 +22,25 @@ export function pointInZone(lat: number, lng: number, zones: Zone[]): Zone | nul
 }
 
 export async function loadZones(): Promise<Zone[]> {
-  const { data, error } = await supabase.from('zones').select('id, name, color, coordinates').order('created_at')
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
+  const { data, error } = await supabase
+    .from('zones')
+    .select('id, name, color, coordinates')
+    .eq('seller_id', user.id)
+    .order('created_at')
   if (error) { console.error('Ошибка загрузки зон:', error); return [] }
   return (data || []) as Zone[]
 }
 
 export async function assignZonesToOrders(): Promise<{ assigned: number; unassigned: number }> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { assigned: 0, unassigned: 0 }
+
   const zones = await loadZones()
   if (zones.length === 0) return { assigned: 0, unassigned: 0 }
 
@@ -51,6 +64,7 @@ export async function assignZonesToOrders(): Promise<{ assigned: number; unassig
   const { data: orders, error } = await supabase
     .from('orders')
     .select('id, lat, lng')
+    .eq('seller_id', user.id)
     .is('courier_name', null)
     .eq('status', 'pending')
     .not('lat', 'is', null)
@@ -76,6 +90,7 @@ export async function assignZonesToOrders(): Promise<{ assigned: number; unassig
         .from('orders')
         .update({ courier_name: couriers[idx], courier_stage: 'not_started' })
         .eq('id', order.id)
+        .eq('seller_id', user.id)
       if (updError) console.error('Ошибка обновления заказа', order.id, updError)
       else assigned++
     } else {
