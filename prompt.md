@@ -1,80 +1,71 @@
-Нашёл настоящую причину — и она серьёзнее, чем просто баг с координатами. Функция assignZonesToOrders вообще не то делает: она ищет заказы с zone_id is null и в случае совпадения зоны пишет zone_id в заказ. А наша карта курьера фильтрует заказы по courier_name! То есть эта функция никогда не могла бы прокинуть заказ курьеру — она просто не с той колонкой работает, и courier_zones (кто из курьеров привязан к зоне) она вообще не читает.
+1. "Работаю с магазинами" в профиле курьера:
 
-Скорее всего, orders.zone_id даже не существует как колонка (мы её никогда не создавали) — отсюда и молчаливые 0: update падает с ошибкой, updError не логируется, updated остаётся 0.
+На странице app/(courier)/profile/page.tsx, в блоке "Работаю с магазинами":
 
-Переписываю assignZonesToOrders под реальную схему — с courier_zones и записью courier_name:
+1. Подгрузи организации, с которыми связан текущий курьер через зоны:
+   select distinct sellers.organization_name, sellers.id
+   from courier_zones
+   join zones on zones.id = courier_zones.zone_id
+   join sellers on sellers.id = zones.seller_id
+   where courier_zones.courier_id = <id текущего курьера>
 
-typescript
-export async function assignZonesToOrders(): Promise<{ assigned: number; unassigned: number }> {
-  const zones = await loadZones()
-  if (zones.length === 0) return { assigned: 0, unassigned: 0 }
+2. Если список пуст — оставь текущий текст "Пока нет заказов, привязанных к магазину"
+3. Если есть — выведи organization_name каждой строкой/бейджем вместо заглушки
 
-  const { data: courierZoneRows, error: czError } = await supabase
-    .from('courier_zones')
-    .select('zone_id, couriers(full_name)')
+2. Кластеризация маркеров:
 
-  if (czError) {
-    console.error('Ошибка загрузки courier_zones:', czError)
-    return { assigned: 0, unassigned: 0 }
-  }
+Установи: npm install leaflet.markercluster
+Установи типы: npm install --save-dev @types/leaflet.markercluster
 
-  const zoneToCouriers: Record<string, string[]> = {}
-  for (const row of courierZoneRows || []) {
-    const name = (row as any).couriers?.full_name
-    if (!name) continue
-    if (!zoneToCouriers[row.zone_id]) zoneToCouriers[row.zone_id] = []
-    zoneToCouriers[row.zone_id].push(name)
-  }
+В components/MapGL.tsx добавь импорты (рядом с существующими leaflet-импортами):
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+import 'leaflet.markercluster'
+import { useMap } from 'react-leaflet'
+import { useEffect, useRef } from 'react'
 
-  const { data: orders, error } = await supabase
-    .from('orders')
-    .select('id, lat, lng')
-    .is('courier_name', null)
-    .eq('status', 'pending')
-    .not('lat', 'is', null)
-    .not('lng', 'is', null)
+Создай компонент ClusterLayer внутри файла (переиспользуй существующую buildMarkerIcon, не переписывай):
 
-  if (error || !orders) {
-    console.error('Ошибка загрузки заказов:', error)
-    return { assigned: 0, unassigned: 0 }
-  }
+function ClusterLayer({ points, colors, selectedId, onPointClick }: {
+  points: MapPoint[]
+  colors: Record<string, string>
+  selectedId?: string | null
+  onPointClick?: (point: MapPoint) => void
+}) {
+  const map = useMap()
+  const clusterRef = useRef<any>(null)
 
-  let assigned = 0
-  let unassigned = 0
-  const roundRobinIndex: Record<string, number> = {}
+  useEffect(() => {
+    const clusterGroup = (L as any).markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+    })
+    clusterRef.current = clusterGroup
+    map.addLayer(clusterGroup)
+    return () => { map.removeLayer(clusterGroup); clusterRef.current = null }
+  }, [map])
 
-  for (const order of orders) {
-    const zone = pointInZone(order.lat, order.lng, zones)
-    const couriers = zone ? zoneToCouriers[zone.id] : undefined
+  useEffect(() => {
+    const clusterGroup = clusterRef.current
+    if (!clusterGroup) return
+    clusterGroup.clearLayers()
+    points.forEach((point) => {
+      const isSelected = point.id === selectedId
+      const icon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected)
+      const marker = L.marker([point.lat, point.lng], { icon })
+      marker.bindPopup(
+        `<div style="font-size:13px"><b>${point.order_number}</b><br/>${point.client_address}<br/>${point.client_phone}<br/><b>${(point.price || 0).toLocaleString('ru-RU')} ₸</b></div>`
+      )
+      if (onPointClick) marker.on('click', () => onPointClick(point))
+      clusterGroup.addLayer(marker)
+    })
+  }, [points, colors, selectedId, onPointClick])
 
-    if (zone && couriers && couriers.length > 0) {
-      const idx = (roundRobinIndex[zone.id] || 0) % couriers.length
-      roundRobinIndex[zone.id] = idx + 1
-      const { error: updError } = await supabase
-        .from('orders')
-        .update({ courier_name: couriers[idx] })
-        .eq('id', order.id)
-      if (updError) console.error('Ошибка обновления заказа', order.id, updError)
-      else assigned++
-    } else {
-      unassigned++
-    }
-  }
-
-  return { assigned, unassigned }
+  return null
 }
 
-И в app/(seller)/zones/page.tsx поправь handleAssign, чтобы показывал оба числа:
+Замени текущий {validPoints.map((point) => <Marker ...>...)} блок внутри MapContainer на:
+<ClusterLayer points={validPoints} colors={colors} selectedId={selectedId} onPointClick={onPointClick} />
 
-typescript
-async function handleAssign() {
-  setAssigning(true)
-  setResult(null)
-  const { assigned, unassigned } = await assignZonesToOrders()
-  setAssigning(false)
-  setResult(`Распределено: ${assigned}, не распределено: ${unassigned}`)
-}
-
-Дай агенту заменить assignZonesToOrders в lib/zones.ts целиком на это, поправить handleAssign, и заодно спроси его — есть ли в orders реально колонка zone_id (пусть проверит через information_schema), чтобы понимать, чинить старую логику или она изначально была нерабочей заглушкой.
-
-После замены — жми кнопку ещё раз, скинь результат.
+Зоны (Polygon) НЕ кластеризуй — оставь как есть, кластеризация только для точек заказов.

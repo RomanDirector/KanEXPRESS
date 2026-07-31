@@ -105,6 +105,8 @@ export default function CourierTrackingMap() {
       .not('lat', 'is', null)
       .not('lng', 'is', null);
 
+      if (mapRef.current !== map) return;
+
     const orders = (orderRows || []) as OrderPoint[];
     const counts = new Map<string, number>();
 
@@ -127,10 +129,13 @@ export default function CourierTrackingMap() {
       .not('current_lat', 'is', null)
       .not('current_lng', 'is', null);
 
+      if (mapRef.current !== map) return;
+
     (couriers || []).forEach((c: Courier) => upsertCourierMarker(map, c));
   }
 
   function upsertCourierMarker(map: L.Map, c: Courier) {
+    if (mapRef.current !== map) return;
     if (c.current_lat == null || c.current_lng == null) return;
 
     const ageMin = c.location_updated_at

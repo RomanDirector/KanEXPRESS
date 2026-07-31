@@ -53,6 +53,7 @@ export default function CourierProfilePage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({})
+  const [zoneOrganizations, setZoneOrganizations] = useState<{ id: string; organization_name: string }[]>([])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -103,6 +104,29 @@ export default function CourierProfilePage() {
         setSellerNames(map)
       })
   }, [supabase, orders])
+
+  // Магазины, привязанные к курьеру через зоны доставки
+  useEffect(() => {
+    supabase
+      .from('courier_zones')
+      .select('zones(seller_id, sellers(id, organization_name))')
+      .eq('courier_id', courier.id)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error(error.message)
+          return
+        }
+        const seen = new Set<string>()
+        const orgs: { id: string; organization_name: string }[] = []
+        ;(data as any[]).forEach((row) => {
+          const seller = row.zones?.sellers
+          if (!seller || seen.has(seller.id)) return
+          seen.add(seller.id)
+          orgs.push({ id: seller.id, organization_name: seller.organization_name })
+        })
+        setZoneOrganizations(orgs)
+      })
+  }, [supabase, courier.id])
 
   const deliveredOrders = orders.filter((o) => o.courier_stage === 'delivered')
   const returnedOrders = orders.filter((o) => o.courier_stage === 'returned')
@@ -252,8 +276,21 @@ export default function CourierProfilePage() {
                 <h3 className="font-semibold">Работаю с магазинами</h3>
               </div>
 
+              {zoneOrganizations.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {zoneOrganizations.map((org) => (
+                    <Badge key={org.id} variant="outline" className="gap-1.5 py-1.5 px-3">
+                      <Store className="h-3 w-3" />
+                      {org.organization_name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
               {sellerSummaries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Пока нет заказов, привязанных к магазину</p>
+                zoneOrganizations.length === 0 && (
+                  <p className="text-sm text-muted-foreground">Пока нет заказов, привязанных к магазину</p>
+                )
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {sellerSummaries.map((s) => (
