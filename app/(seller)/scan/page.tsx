@@ -86,6 +86,18 @@ export default function ScanPage() {
     setScanning(false);
   }
 
+  function extractOrderNumber(raw: string): string {
+    const trimmed = raw.trim();
+    try {
+      const url = new URL(trimmed);
+      const param = url.searchParams.get('order_number') || url.searchParams.get('order');
+      if (param) return param;
+    } catch {
+      // не ссылка — значит это уже голый номер заказа (как с этикетки)
+    }
+    return trimmed;
+  }
+
   async function startScanner() {
     resetResult();
     setScanning(true);
@@ -98,7 +110,7 @@ export default function ScanPage() {
         { fps: 10, qrbox: 250 },
         (decodedText: string) => {
           stopScanner();
-          lookupOrder(decodedText.trim());
+          lookupOrder(extractOrderNumber(decodedText));
         },
         () => {
           // ошибка распознавания одного кадра — игнорируем
@@ -277,25 +289,23 @@ export default function ScanPage() {
         )}
         <div id={READER_ID} className={scanning ? 'mt-3 max-w-sm' : 'hidden'} />
 
-        {mode === 'pickup' && (
-          <div className="flex items-end gap-2 mt-4">
-            <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('manualOrderNumberLabel')}</span>
-              <input
-                value={manualNumber}
-                onChange={(e) => setManualNumber(e.target.value)}
-                className="border rounded px-2 py-1.5 w-48"
-                placeholder={t('manualOrderNumberPlaceholder')}
-              />
-            </label>
-            <button
-              onClick={() => lookupOrder(manualNumber.trim())}
-              className="px-4 py-2 rounded border text-sm font-semibold"
-            >
-              {t('findOrderBtn')}
-            </button>
-          </div>
-        )}
+        <div className="flex items-end gap-2 mt-4">
+          <label className="text-sm">
+            <span className="block text-xs text-gray-500">{t('manualOrderNumberLabel')}</span>
+            <input
+              value={manualNumber}
+              onChange={(e) => setManualNumber(e.target.value)}
+              className="border rounded px-2 py-1.5 w-48"
+              placeholder={t('manualOrderNumberPlaceholder')}
+            />
+          </label>
+          <button
+            onClick={() => lookupOrder(extractOrderNumber(manualNumber))}
+            className="px-4 py-2 rounded border text-sm font-semibold"
+          >
+            {t('findOrderBtn')}
+          </button>
+        </div>
       </div>
 
       {errorMsg && (

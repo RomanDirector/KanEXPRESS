@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { useCourier } from '@/lib/courier-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -53,7 +54,8 @@ export default function CourierProfilePage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({})
-  const [zoneOrganizations, setZoneOrganizations] = useState<{ id: string; organization_name: string }[]>([])
+  const [sellerNamesLoading, setSellerNamesLoading] = useState(false)
+  const [zoneOrganizations, setZoneOrganizations] = useState<{ id: string; label: string }[]>([])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -81,13 +83,18 @@ export default function CourierProfilePage() {
     }
   }, [supabase, courier.full_name])
 
-  // Подтягиваем названия магазинов по seller_id заказов — как на /courier-dashboard
+  // Подтягиваем названия магазинов напрямую из sellers по всем уникальным
+  // seller_id заказов курьера — как на /courier-dashboard
   useEffect(() => {
     const sellerIds = Array.from(
       new Set(orders.map((o) => o.seller_id).filter((id): id is string => !!id)),
     )
-    if (sellerIds.length === 0) return
+    if (sellerIds.length === 0) {
+      setSellerNamesLoading(false)
+      return
+    }
 
+    setSellerNamesLoading(true)
     supabase
       .from('sellers')
       .select('id, organization_name')
@@ -95,6 +102,7 @@ export default function CourierProfilePage() {
       .then(({ data, error }) => {
         if (error) {
           console.error(error.message)
+          setSellerNamesLoading(false)
           return
         }
         const map: Record<string, string> = {}
@@ -102,28 +110,62 @@ export default function CourierProfilePage() {
           map[s.id] = s.organization_name
         })
         setSellerNames(map)
+        setSellerNamesLoading(false)
       })
   }, [supabase, orders])
 
-  // Магазины, привязанные к курьеру через зоны доставки
+  // Магазины, привязанные к курьеру через зоны доставки.
+  // Делаем это тремя отдельными запросами вместо вложенного select —
+  // у zones нет FK-связи с sellers в schema cache PostgREST, поэтому
+  // embed zones(sellers(...)) падает с "Could not find a relationship".
   useEffect(() => {
     supabase
       .from('courier_zones')
-      .select('zones(seller_id, sellers(id, organization_name))')
+      .select('zone_id')
       .eq('courier_id', courier.id)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error(error.message)
+      .then(async ({ data: courierZoneRows, error: czError }) => {
+        if (czError) {
+          console.error(czError.message)
           return
         }
-        const seen = new Set<string>()
-        const orgs: { id: string; organization_name: string }[] = []
-        ;(data as any[]).forEach((row) => {
-          const seller = row.zones?.sellers
-          if (!seller || seen.has(seller.id)) return
-          seen.add(seller.id)
-          orgs.push({ id: seller.id, organization_name: seller.organization_name })
-        })
+        const zoneIds = Array.from(new Set((courierZoneRows || []).map((r) => r.zone_id)))
+        if (zoneIds.length === 0) {
+          setZoneOrganizations([])
+          return
+        }
+
+        const { data: zoneRows, error: zoneErr } = await supabase
+          .from('zones')
+          .select('seller_id')
+          .in('id', zoneIds)
+        if (zoneErr) {
+          console.error(zoneErr.message)
+          return
+        }
+
+        const sellerIds = Array.from(
+          new Set((zoneRows || []).map((z) => z.seller_id).filter((id): id is string => !!id)),
+        )
+        if (sellerIds.length === 0) {
+          setZoneOrganizations([])
+          return
+        }
+
+        const { data: sellerRows, error: sellerErr } = await supabase
+          .from('sellers')
+          .select('id, organization_name, phone')
+          .in('id', sellerIds)
+        if (sellerErr) {
+          console.error(sellerErr.message)
+          return
+        }
+
+        const orgs = (sellerRows || []).map((seller) => ({
+          id: seller.id,
+          // organization_name может быть не заполнен продавцом — тогда показываем
+          // его телефон, а не статичную заглушку вроде "Магазин"
+          label: (seller.organization_name || '').trim() || seller.phone || 'Без названия',
+        }))
         setZoneOrganizations(orgs)
       })
   }, [supabase, courier.id])
@@ -153,7 +195,7 @@ export default function CourierProfilePage() {
 
       return {
         sellerId,
-        name: sellerNames[sellerId] ?? 'Магазин',
+        name: sellerNames[sellerId],
         deliveredCount: sellerDelivered.length,
         earned: sellerDelivered.reduce((sum, o) => sum + (o.courier_fee ?? 0), 0),
         lastOrderDate,
@@ -171,7 +213,7 @@ export default function CourierProfilePage() {
       )
       return {
         sellerId,
-        name: sellerNames[sellerId] ?? 'Магазин',
+        name: sellerNames[sellerId],
         debt: unpaidDelivered.reduce((sum, o) => sum + (o.courier_fee ?? 0), 0),
       }
     })
@@ -259,7 +301,11 @@ export default function CourierProfilePage() {
                     >
                       <div className="flex items-center gap-2">
                         <Store className="h-4 w-4 text-amber-700" />
-                        <p className="font-semibold text-amber-900 truncate">{s.name}</p>
+                        {sellerNamesLoading ? (
+                          <Skeleton className="h-4 w-28" />
+                        ) : (
+                          <p className="font-semibold text-amber-900 truncate">{s.name ?? 'Нет данных'}</p>
+                        )}
                       </div>
                       <p className="text-sm text-amber-800">
                         Должен вам: <span className="font-bold">{s.debt} ₸</span>
@@ -281,7 +327,7 @@ export default function CourierProfilePage() {
                   {zoneOrganizations.map((org) => (
                     <Badge key={org.id} variant="outline" className="gap-1.5 py-1.5 px-3">
                       <Store className="h-3 w-3" />
-                      {org.organization_name}
+                      {org.label}
                     </Badge>
                   ))}
                 </div>
@@ -297,7 +343,11 @@ export default function CourierProfilePage() {
                     <Card key={s.sellerId} className="rounded-2xl p-5 space-y-3">
                       <div className="flex items-center gap-2">
                         <Store className="h-4 w-4 text-muted-foreground" />
-                        <p className="font-semibold text-foreground truncate">{s.name}</p>
+                        {sellerNamesLoading ? (
+                          <Skeleton className="h-4 w-28" />
+                        ) : (
+                          <p className="font-semibold text-foreground truncate">{s.name ?? 'Нет данных'}</p>
+                        )}
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Доставлено</span>
@@ -342,7 +392,15 @@ export default function CourierProfilePage() {
                           <TableRow key={order.id}>
                             <TableCell className="font-mono font-medium">{order.order_number}</TableCell>
                             <TableCell className="text-muted-foreground">
-                              {order.seller_id ? sellerNames[order.seller_id] ?? 'Магазин' : '—'}
+                              {order.seller_id ? (
+                                sellerNamesLoading ? (
+                                  <Skeleton className="h-4 w-20" />
+                                ) : (
+                                  sellerNames[order.seller_id] ?? 'Нет данных'
+                                )
+                              ) : (
+                                '—'
+                              )}
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={`gap-1 ${stage.className}`}>

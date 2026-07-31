@@ -39,6 +39,7 @@ interface Order {
   courier_stage: CourierStage
   courier_fee: number
   kaspi_pickup_code: string
+  kaspi_order_id: string | null
   courier_name: string
   seller_id: string | null
   status: string
@@ -221,7 +222,8 @@ export default function CourierDashboardPage() {
   }, [supabase, orders])
 
   async function updateStage(orderId: string, stage: CourierStage) {
-    const previousStage = orders.find((o) => o.id === orderId)?.courier_stage
+    const order = orders.find((o) => o.id === orderId)
+    const previousStage = order?.courier_stage
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? { ...o, courier_stage: stage } : o)),
     )
@@ -238,12 +240,42 @@ export default function CourierDashboardPage() {
           o.id === orderId && previousStage ? { ...o, courier_stage: previousStage } : o,
         ),
       )
+      return
+    }
+
+    // Заказ из Kaspi — триггерим отправку кода клиенту, как только курьер на месте.
+    if (stage === 'arrived' && order?.kaspi_order_id) {
+      const res = await fetch('/api/kaspi/request-delivery-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        console.error('Kaspi request-delivery-code:', body?.error ?? res.status)
+      }
     }
   }
 
   async function confirmDelivery(order: Order) {
     const entered = (codeInputs[order.id] ?? '').trim()
 
+    // Заказ из Kaspi — код проверяет сам Kaspi, локально ничего не сравниваем.
+    if (order.kaspi_order_id) {
+      setCodeErrors((prev) => ({ ...prev, [order.id]: '' }))
+      const res = await fetch('/api/kaspi/confirm-delivery-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: order.id, code: entered }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setCodeErrors((prev) => ({ ...prev, [order.id]: body?.error ?? 'Не удалось подтвердить код' }))
+      }
+      return
+    }
+
+    // Заказ создан вручную (не через Kaspi) — прежняя локальная проверка кода.
     if (entered !== order.kaspi_pickup_code) {
       setCodeErrors((prev) => ({ ...prev, [order.id]: 'Неверный код, проверьте и попробуйте снова' }))
       return

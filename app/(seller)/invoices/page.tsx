@@ -16,9 +16,17 @@ interface Order {
   status: string
   price: number
   created_at: string
+  product_name: string | null
+  zone_id: string | null
+  zones: { name: string } | null
 }
 
-async function generatePDF(order: Order) {
+interface SellerInfo {
+  organization_name: string | null
+  phone: string | null
+}
+
+async function generatePDF(order: Order, seller: SellerInfo | null) {
   const doc = new jsPDF()
 
   doc.setFontSize(22)
@@ -27,30 +35,66 @@ async function generatePDF(order: Order) {
   doc.setFontSize(12)
   doc.setTextColor(0, 0, 0)
   doc.text('Invoice', 20, 30)
+
+  if (order.zone_id && order.zones?.name) {
+    doc.setFontSize(28)
+    doc.setTextColor(220, 0, 0)
+    doc.text(order.zones.name, 190, 22, { align: 'right' })
+  }
+
   doc.setDrawColor(220, 0, 0)
   doc.line(20, 35, 190, 35)
 
+  // Таблица "Отправитель / Получатель" (как в накладной у конкурента)
+  const tableTop = 42
+  const tableHeaderH = 8
+  const tableH = 46
+  const tableMidX = 105
+  doc.setDrawColor(0, 0, 0)
+  doc.rect(20, tableTop, 170, tableH)
+  doc.line(tableMidX, tableTop, tableMidX, tableTop + tableH)
+  doc.line(20, tableTop + tableHeaderH, 190, tableTop + tableHeaderH)
+
+  doc.setFontSize(9)
+  doc.setTextColor(120, 120, 120)
+  doc.text('ОТПРАВИТЕЛЬ', 23, tableTop + 5.5)
+  doc.text('ПОЛУЧАТЕЛЬ', tableMidX + 3, tableTop + 5.5)
+
   doc.setFontSize(11)
-  doc.text(`Order: ${order.order_number}`, 20, 45)
-  doc.text(`Phone: ${order.client_phone}`, 20, 55)
-  doc.text(`Address: ${order.client_address}`, 20, 65)
-  doc.text(`Price: ${order.price} KZT`, 20, 75)
-  doc.text(`Status: ${order.status}`, 20, 85)
-  doc.text(`Date: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, 20, 95)
+  doc.setTextColor(0, 0, 0)
+  doc.text(seller?.organization_name || 'KanEXpress', 23, tableTop + tableHeaderH + 8)
+  doc.text(seller?.phone || '-', 23, tableTop + tableHeaderH + 16)
+
+  doc.text(order.client_phone, tableMidX + 3, tableTop + tableHeaderH + 8)
+  const addressLines = doc.splitTextToSize(order.client_address, 62)
+  doc.text(addressLines, tableMidX + 3, tableTop + tableHeaderH + 16)
+
+  let y = tableTop + tableH + 12
+  doc.setFontSize(11)
+  doc.text(`Order: ${order.order_number}`, 20, y); y += 10
+  doc.text(`Price: ${order.price} KZT`, 20, y); y += 10
+  doc.text(`Status: ${order.status}`, 20, y); y += 10
+  doc.text(`Date: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, 20, y); y += 10
+
+  if (order.product_name) {
+    doc.text(order.product_name, 20, y)
+    y += 10
+  }
 
   // Штрихкод
   const canvas = document.createElement('canvas')
   JsBarcode(canvas, order.order_number, { format: 'CODE128', width: 2, height: 60, displayValue: true })
-  doc.addImage(canvas.toDataURL('image/png'), 'PNG', 20, 105, 110, 35)
+  doc.addImage(canvas.toDataURL('image/png'), 'PNG', 20, y, 110, 35)
 
   // QR-код (ведёт на страницу отслеживания заказа)
-  const qrDataUrl = await QRCode.toDataURL(`https://kanexpress.kz/order-tracking?order=${order.order_number}`, { width: 200 })
-  doc.addImage(qrDataUrl, 'PNG', 140, 105, 40, 40)
+  const qrDataUrl = await QRCode.toDataURL(`https://kanexpress.kz/order-tracking?order_number=${order.order_number}`, { width: 200 })
+  doc.addImage(qrDataUrl, 'PNG', 140, y, 40, 40)
 
-  doc.line(20, 155, 190, 155)
+  y += 45
+  doc.line(20, y, 190, y)
   doc.setFontSize(9)
   doc.setTextColor(150, 150, 150)
-  doc.text('KanEXpress — Logistics for Kaspi.kz sellers', 20, 162)
+  doc.text('KanEXpress — Logistics for Kaspi.kz sellers', 20, y + 7)
 
   doc.save(`invoice-${order.order_number}.pdf`)
 }
@@ -62,6 +106,12 @@ async function generateLabel(order: Order) {
   doc.setFontSize(14)
   doc.setTextColor(220, 0, 0)
   doc.text('KanEXpress', 5, 10)
+
+  if (order.zone_id && order.zones?.name) {
+    doc.setFontSize(18)
+    doc.setTextColor(220, 0, 0)
+    doc.text(order.zones.name, 95, 10, { align: 'right' })
+  }
 
   doc.setFontSize(10)
   doc.setTextColor(0, 0, 0)
@@ -81,6 +131,7 @@ async function generateLabel(order: Order) {
 export default function InvoicesPage() {
   const { t } = useLang()
   const [orders, setOrders] = useState<Order[]>([])
+  const [seller, setSeller] = useState<SellerInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -94,13 +145,22 @@ export default function InvoicesPage() {
         setLoading(false)
         return
       }
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, order_number, client_phone, client_address, status, price, created_at')
-        .eq('seller_id', user.id)
-        .order('created_at', { ascending: false })
+      const [{ data, error }, { data: sellerData, error: sellerError }] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('id, order_number, client_phone, client_address, status, price, created_at, product_name, zone_id, zones ( name )')
+          .eq('seller_id', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('sellers')
+          .select('organization_name, phone')
+          .eq('id', user.id)
+          .maybeSingle(),
+      ])
       if (error) console.error(error.message)
-      else setOrders(data as Order[])
+      else setOrders((data || []) as unknown as Order[])
+      if (sellerError) console.error(sellerError.message)
+      else setSeller(sellerData as SellerInfo | null)
       setLoading(false)
     }
     fetchOrders()
@@ -123,7 +183,7 @@ export default function InvoicesPage() {
   const downloadSelected = async () => {
     const toDownload = selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders
     for (const order of toDownload) {
-      await generatePDF(order)
+      await generatePDF(order, seller)
     }
   }
 
@@ -184,7 +244,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-4 font-bold text-gray-900">{order.price?.toLocaleString('ru-RU')} ₸</td>
                     <td className="px-4 py-4">
                       <button
-                        onClick={() => generatePDF(order)}
+                        onClick={() => generatePDF(order, seller)}
                         className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-all"
                       >
                         PDF + QR

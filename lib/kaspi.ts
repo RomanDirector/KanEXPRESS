@@ -122,6 +122,7 @@ export function mapKaspiStatus(state: string): string {
 export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
   return {
     seller_id: sellerId,
+    kaspi_order_id: order.id,
     order_number: order.code,
     client_phone: order.customer?.cellPhone ?? '',
     client_address: order.deliveryAddress?.formattedAddress ?? '',
@@ -130,6 +131,54 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
     lat: order.deliveryAddress?.latitude ?? null,
     lng: order.deliveryAddress?.longitude ?? null,
   }
+}
+
+// Двухшаговое подтверждение выдачи заказа курьером через Kaspi API: сначала
+// запрашиваем отправку кода клиенту (X-Send-Code: true без кода), затем
+// подтверждаем введённый курьером код (X-Security-Code).
+export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
+  token: string; kaspiOrderId: string; orderCode: string
+}): Promise<void> {
+  const res = await fetch(`${KASPI_API_BASE}/orders`, {
+    method: 'POST',
+    headers: {
+      'X-Auth-Token': token,
+      'X-Security-Code': '',
+      'X-Send-Code': 'true',
+      'Content-Type': 'application/vnd.api+json',
+    },
+    body: JSON.stringify({
+      data: { type: 'orders', id: kaspiOrderId, attributes: { code: orderCode, status: 'COMPLETED' } },
+    }),
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Kaspi API (request code) ответил ${res.status}: ${body}`)
+  }
+}
+
+export async function confirmDeliveryCode({ token, kaspiOrderId, orderCode, securityCode }: {
+  token: string; kaspiOrderId: string; orderCode: string; securityCode: string
+}): Promise<{ status: string }> {
+  const res = await fetch(`${KASPI_API_BASE}/orders`, {
+    method: 'POST',
+    headers: {
+      'X-Auth-Token': token,
+      'X-Security-Code': securityCode,
+      'X-Send-Code': 'true',
+      'Content-Type': 'application/vnd.api+json',
+    },
+    body: JSON.stringify({
+      data: { type: 'orders', id: kaspiOrderId, attributes: { code: orderCode, status: 'COMPLETED' } },
+    }),
+    cache: 'no-store',
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(`Kaspi API (confirm code) ответил ${res.status}: ${JSON.stringify(body)}`)
+  const status = body?.data?.attributes?.status
+  if (status !== 'COMPLETED') throw new Error('Kaspi не подтвердил код')
+  return { status }
 }
 
 // --- Публикация цен через Kaspi Merchant API (KASPI_MERCHANT_TOKEN/KASPI_MERCHANT_ID) ---

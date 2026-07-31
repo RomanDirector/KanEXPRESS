@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, Map, BarChart2, User, LogOut, Ban } from 'lucide-react'
+import { LayoutDashboard, Map, BarChart2, User, LogOut, Ban, ScanLine } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { CourierContext, type CourierProfile } from '@/lib/courier-context'
 import { Spinner } from '@/components/ui/spinner'
 
 const navItems = [
   { href: '/courier-dashboard', label: 'Мои заказы', icon: LayoutDashboard },
+  { href: '/courier-scan', label: 'Сканер', icon: ScanLine },
   { href: '/courier-map', label: 'Карта', icon: Map },
   { href: '/courier-stats', label: 'Статистика', icon: BarChart2 },
   { href: '/courier-cancelled', label: 'Отменённые', icon: Ban },

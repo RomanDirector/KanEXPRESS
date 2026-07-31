@@ -1,71 +1,70 @@
-1. "Работаю с магазинами" в профиле курьера:
+1. В lib/kaspi.ts, в mapKaspiOrderToRow() — добавь kaspi_order_id: order.id в возвращаемый объект.
 
-На странице app/(courier)/profile/page.tsx, в блоке "Работаю с магазинами":
+2. В lib/kaspi.ts добавь две новые функции (после существующих):
 
-1. Подгрузи организации, с которыми связан текущий курьер через зоны:
-   select distinct sellers.organization_name, sellers.id
-   from courier_zones
-   join zones on zones.id = courier_zones.zone_id
-   join sellers on sellers.id = zones.seller_id
-   where courier_zones.courier_id = <id текущего курьера>
-
-2. Если список пуст — оставь текущий текст "Пока нет заказов, привязанных к магазину"
-3. Если есть — выведи organization_name каждой строкой/бейджем вместо заглушки
-
-2. Кластеризация маркеров:
-
-Установи: npm install leaflet.markercluster
-Установи типы: npm install --save-dev @types/leaflet.markercluster
-
-В components/MapGL.tsx добавь импорты (рядом с существующими leaflet-импортами):
-import 'leaflet.markercluster/dist/MarkerCluster.css'
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-import 'leaflet.markercluster'
-import { useMap } from 'react-leaflet'
-import { useEffect, useRef } from 'react'
-
-Создай компонент ClusterLayer внутри файла (переиспользуй существующую buildMarkerIcon, не переписывай):
-
-function ClusterLayer({ points, colors, selectedId, onPointClick }: {
-  points: MapPoint[]
-  colors: Record<string, string>
-  selectedId?: string | null
-  onPointClick?: (point: MapPoint) => void
-}) {
-  const map = useMap()
-  const clusterRef = useRef<any>(null)
-
-  useEffect(() => {
-    const clusterGroup = (L as any).markerClusterGroup({
-      maxClusterRadius: 50,
-      spiderfyOnMaxZoom: true,
-      showCoverageOnHover: false,
-    })
-    clusterRef.current = clusterGroup
-    map.addLayer(clusterGroup)
-    return () => { map.removeLayer(clusterGroup); clusterRef.current = null }
-  }, [map])
-
-  useEffect(() => {
-    const clusterGroup = clusterRef.current
-    if (!clusterGroup) return
-    clusterGroup.clearLayers()
-    points.forEach((point) => {
-      const isSelected = point.id === selectedId
-      const icon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected)
-      const marker = L.marker([point.lat, point.lng], { icon })
-      marker.bindPopup(
-        `<div style="font-size:13px"><b>${point.order_number}</b><br/>${point.client_address}<br/>${point.client_phone}<br/><b>${(point.price || 0).toLocaleString('ru-RU')} ₸</b></div>`
-      )
-      if (onPointClick) marker.on('click', () => onPointClick(point))
-      clusterGroup.addLayer(marker)
-    })
-  }, [points, colors, selectedId, onPointClick])
-
-  return null
+export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
+  token: string; kaspiOrderId: string; orderCode: string
+}): Promise<void> {
+  const res = await fetch(`${KASPI_API_BASE}/orders`, {
+    method: 'POST',
+    headers: {
+      'X-Auth-Token': token,
+      'X-Security-Code': '',
+      'X-Send-Code': 'true',
+      'Content-Type': 'application/vnd.api+json',
+    },
+    body: JSON.stringify({
+      data: { type: 'orders', id: kaspiOrderId, attributes: { code: orderCode, status: 'COMPLETED' } },
+    }),
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Kaspi API (request code) ответил ${res.status}: ${body}`)
+  }
 }
 
-Замени текущий {validPoints.map((point) => <Marker ...>...)} блок внутри MapContainer на:
-<ClusterLayer points={validPoints} colors={colors} selectedId={selectedId} onPointClick={onPointClick} />
+export async function confirmDeliveryCode({ token, kaspiOrderId, orderCode, securityCode }: {
+  token: string; kaspiOrderId: string; orderCode: string; securityCode: string
+}): Promise<{ status: string }> {
+  const res = await fetch(`${KASPI_API_BASE}/orders`, {
+    method: 'POST',
+    headers: {
+      'X-Auth-Token': token,
+      'X-Security-Code': securityCode,
+      'X-Send-Code': 'true',
+      'Content-Type': 'application/vnd.api+json',
+    },
+    body: JSON.stringify({
+      data: { type: 'orders', id: kaspiOrderId, attributes: { code: orderCode, status: 'COMPLETED' } },
+    }),
+    cache: 'no-store',
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(`Kaspi API (confirm code) ответил ${res.status}: ${JSON.stringify(body)}`)
+  const status = body?.data?.attributes?.status
+  if (status !== 'COMPLETED') throw new Error('Kaspi не подтвердил код')
+  return { status }
+}
 
-Зоны (Polygon) НЕ кластеризуй — оставь как есть, кластеризация только для точек заказов.
+3. Создай app/api/kaspi/request-delivery-code/route.ts (POST, body: { orderId }):
+   - через createAdminClient() найди order по id, возьми kaspi_order_id, order_number, seller_id
+   - если kaspi_order_id пуст — верни 400 "Это не Kaspi-заказ"
+   - найди sellers.kaspi_token по seller_id, проверь isValidKaspiToken
+   - вызови requestDeliveryCode(), верни { ok: true } или ошибку 500 с текстом
+
+4. Создай app/api/kaspi/confirm-delivery-code/route.ts (POST, body: { orderId, code }):
+   - та же подготовка, что в п.3
+   - вызови confirmDeliveryCode() с введённым courier'ом code как securityCode
+   - при успехе — обнови orders: status='delivered', courier_stage='delivered'
+   - при ошибке Kaspi (неверный код/сбой) — верни понятную ошибку клиенту, НЕ трогай статус заказа
+
+5. В app/(courier)/courier-dashboard/page.tsx:
+   - у кнопки "Прибыл" (updateStage(order.id, 'arrived')) — если order.kaspi_order_id есть, 
+     после успешного обновления stage вызови POST /api/kaspi/request-delivery-code с orderId 
+     (это триггерит push клиенту с кодом)
+   - confirmDelivery() — вместо локального сравнения entered !== order.kaspi_pickup_code, 
+     вызывай POST /api/kaspi/confirm-delivery-code с { orderId: order.id, code: entered }, 
+     обрабатывай ответ (успех/ошибка) вместо локальной проверки
+   - Если order.kaspi_order_id пуст (заказ создан вручную, не через Kaspi) — оставь текущую 
+     локальную логику как fallback, ничего не ломай для тестовых заказов

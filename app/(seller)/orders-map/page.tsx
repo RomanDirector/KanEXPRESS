@@ -14,6 +14,7 @@ interface Order {
   client_phone: string
   client_address: string
   status: string
+  courier_stage: string | null
   price: number
   courier_name: string | null
   lat: number | null
@@ -25,6 +26,14 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   pending:    { label: 'Не отгружено', color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',  icon: <Package size={14} /> },
   in_transit: { label: 'В пути',       color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={14} /> },
   delivered:  { label: 'Доставлено',   color: 'text-green-700',  bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={14} /> },
+}
+
+// Курьер мог принять заказ сканом (status = 'in_transit'), но ещё не нажать
+// "Выехал" на своём дашборде (courier_stage остаётся 'not_started') — в этом
+// окне заказ физически лежит у курьера, а не едет к клиенту.
+function getStatusLabel(order: Pick<Order, 'status' | 'courier_stage'>): string {
+  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return 'Отгружено'
+  return STATUS_CONFIG[order.status]?.label ?? order.status
 }
 
 export default function MapPage() {
@@ -46,7 +55,7 @@ export default function MapPage() {
       }
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, client_phone, client_address, status, price, courier_name, lat, lng, created_at')
+        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
       if (error) console.error(error.message)
@@ -147,7 +156,7 @@ export default function MapPage() {
                   <span className="font-mono font-bold text-gray-900 text-sm">{order.order_number}</span>
                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_CONFIG[order.status]?.bg} ${STATUS_CONFIG[order.status]?.color}`}>
                     {STATUS_CONFIG[order.status]?.icon}
-                    {STATUS_CONFIG[order.status]?.label}
+                    {getStatusLabel(order)}
                   </span>
                 </div>
                 <div className="flex items-start gap-1.5 text-xs text-gray-500">
@@ -207,7 +216,7 @@ export default function MapPage() {
                   <span className="text-sm text-gray-500">{t('status')}</span>
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${STATUS_CONFIG[selectedOrder.status]?.bg} ${STATUS_CONFIG[selectedOrder.status]?.color}`}>
                     {STATUS_CONFIG[selectedOrder.status]?.icon}
-                    {STATUS_CONFIG[selectedOrder.status]?.label}
+                    {getStatusLabel(selectedOrder)}
                   </span>
                 </div>
                 <div className="flex justify-between">

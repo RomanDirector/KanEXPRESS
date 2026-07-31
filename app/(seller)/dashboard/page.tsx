@@ -20,6 +20,7 @@ interface Order {
   client_phone: string
   client_address: string
   status: OrderStatus
+  courier_stage: string | null
   price: number
   courier_name: string | null
   comment: string | null
@@ -35,6 +36,14 @@ const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React
   pending:    { color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200',  icon: <Package size={13} /> },
   in_transit: { color: 'text-blue-700',  bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={13} /> },
   delivered:  { color: 'text-green-700', bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={13} /> },
+}
+
+// Курьер мог принять заказ сканом (status = 'in_transit'), но ещё не нажать
+// "Выехал" на своём дашборде (courier_stage остаётся 'not_started') — в этом
+// окне заказ физически лежит у курьера, а не едет к клиенту.
+function statusLabelKey(order: Pick<Order, 'status' | 'courier_stage'>): OrderStatus | 'shipped' {
+  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return 'shipped'
+  return order.status
 }
 
 export default function SellerDashboard() {
@@ -58,7 +67,7 @@ export default function SellerDashboard() {
     const { data, error } = await supabase
       .from('orders')
       .select(
-        'id, order_number, client_phone, client_address, status, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+        'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
       )
       .eq('seller_id', sellerId)
       .order('created_at', { ascending: false })
@@ -77,7 +86,7 @@ export default function SellerDashboard() {
       const { data, error } = await supabase
         .from('orders')
         .select(
-          'id, order_number, client_phone, client_address, status, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+          'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
         )
         .eq('seller_id', currentSellerId)
         .order('created_at', { ascending: false })
@@ -487,7 +496,7 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
                         {STATUS_STYLE[order.status].icon}
-                        {t(order.status)}
+                        {t(statusLabelKey(order))}
                       </span>
                       {order.accepted_at ? (
                         <span
