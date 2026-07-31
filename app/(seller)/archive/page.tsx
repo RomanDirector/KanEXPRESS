@@ -37,6 +37,7 @@ export default function ArchivePage() {
   const [photoOrder, setPhotoOrder] = useState<ArchOrder | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [sellerId, setSellerId] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -44,17 +45,27 @@ export default function ArchivePage() {
 
   async function load() {
     setLoading(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const currentSellerId = user?.id ?? null;
+    setSellerId(currentSellerId);
+    if (!currentSellerId) {
+      setLoading(false);
+      return;
+    }
     const status = tab === 'delivered' ? 'delivered' : 'archived';
     const { data, error } = await supabase
       .from('orders')
       .select(
         'id, order_number, comment, client_phone, client_address, status, photo_url, created_at'
       )
+      .eq('seller_id', currentSellerId)
       .eq('status', status)
       .order('created_at', { ascending: false });
     if (error) {
       console.error('archive load failed:', error);
-      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
+      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
     }
     setOrders((data || []) as ArchOrder[]);
     setLoading(false);
@@ -130,12 +141,13 @@ export default function ArchivePage() {
     const { error: updateError } = await supabase
       .from('orders')
       .update({ photo_url: pub.publicUrl })
-      .eq('id', photoOrder.id);
+      .eq('id', photoOrder.id)
+      .eq('seller_id', sellerId ?? '');
     if (updateError) {
       console.error(updateError);
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     } else {
-      setToast({ message: 'Фото успешно загружено', type: 'success' });
+      setToast({ message: t('photoUploadedMsg'), type: 'success' });
     }
     setUploading(false);
     setPhotoOrder(null);

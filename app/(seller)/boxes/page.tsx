@@ -37,6 +37,7 @@ export default function BoxesPage() {
   const [qrBox, setQrBox] = useState<Box | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [sellerId, setSellerId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAll();
@@ -44,16 +45,27 @@ export default function BoxesPage() {
 
   async function loadAll() {
     setLoading(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    setSellerId(user?.id ?? null);
+    if (!user) {
+      setBoxes([]);
+      setZones([]);
+      setLoading(false);
+      return;
+    }
     const [{ data: b, error: bErr }, z] = await Promise.all([
       supabase
         .from('delivery_boxes')
         .select('id, code, label, zone_id, zones ( name )')
+        .eq('seller_id', user.id)
         .order('label'),
       loadZones(),
     ]);
     if (bErr) {
       console.error(bErr);
-      setToast({ message: 'Не удалось загрузить данные: ' + bErr.message, type: 'error' });
+      setToast({ message: t('loadErrorPrefix') + bErr.message, type: 'error' });
     }
     setBoxes((b || []) as unknown as Box[]);
     setZones(z);
@@ -76,17 +88,21 @@ export default function BoxesPage() {
     setNewLabel('');
     setNewZoneId('');
     setShowAddForm(false);
-    setToast({ message: 'Бокс успешно добавлен', type: 'success' });
+    setToast({ message: t('boxAddedMsg'), type: 'success' });
     loadAll();
   }
 
   async function deleteBox(box: Box) {
     if (!confirm(t('deleteBoxConfirm').replace('{name}', box.label))) return;
-    const { error } = await supabase.from('delivery_boxes').delete().eq('id', box.id);
+    const { error } = await supabase
+      .from('delivery_boxes')
+      .delete()
+      .eq('id', box.id)
+      .eq('seller_id', sellerId ?? '');
     if (error) {
       alert(t('errorPrefix') + error.message);
     } else {
-      setToast({ message: 'Бокс успешно удалён', type: 'success' });
+      setToast({ message: t('boxDeletedMsg'), type: 'success' });
     }
     loadAll();
   }
@@ -99,7 +115,7 @@ export default function BoxesPage() {
       setQrDataUrl(dataUrl);
     } catch (e) {
       console.error(e);
-      setToast({ message: 'Не удалось сгенерировать QR-код', type: 'error' });
+      setToast({ message: t('qrGenerateErrorMsg'), type: 'error' });
     }
   }
 

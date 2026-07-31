@@ -5,14 +5,16 @@ import Link from 'next/link';
 import { ArrowLeft, Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
 import type { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabase';
-import { useLang } from '@/lib/i18n';
+import { useLang, localeTag } from '@/lib/i18n';
 import { Toast } from '@/components/Toast';
+import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates';
 
 type Mode = 'drop' | 'pickup';
 
 interface OrderRow {
   id: string;
   order_number: string;
+  client_phone: string | null;
   zone_id: string | null;
   box_id: string | null;
   dropped_at: string | null;
@@ -30,7 +32,8 @@ interface BoxRow {
 const READER_ID = 'qr-reader-region';
 
 export default function ScanPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const locale = localeTag(lang);
   const [mode, setMode] = useState<Mode>('drop');
   const [scanning, setScanning] = useState(false);
   const [manualNumber, setManualNumber] = useState('');
@@ -40,8 +43,13 @@ export default function ScanPage() {
   const [resultBox, setResultBox] = useState<BoxRow | null>(null);
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
+  const [sellerId, setSellerId] = useState<string | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setSellerId(user?.id ?? null));
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -105,17 +113,18 @@ export default function ScanPage() {
 
   async function lookupOrder(orderNumber: string) {
     resetResult();
-    if (!orderNumber) return;
+    if (!orderNumber || !sellerId) return;
 
     const { data: order, error } = await supabase
       .from('orders')
-      .select('id, order_number, zone_id, box_id, dropped_at, accepted_at, status, zones ( name, color )')
+      .select('id, order_number, client_phone, zone_id, box_id, dropped_at, accepted_at, status, zones ( name, color )')
+      .eq('seller_id', sellerId)
       .eq('order_number', orderNumber)
       .maybeSingle();
 
     if (error) {
       console.error(error);
-      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
+      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
     }
 
     if (!order) {
@@ -133,12 +142,13 @@ export default function ScanPage() {
       const { data: box, error: boxErr } = await supabase
         .from('delivery_boxes')
         .select('id, code, label')
+        .eq('seller_id', sellerId)
         .eq('zone_id', orderRow.zone_id)
         .limit(1)
         .maybeSingle();
       if (boxErr) {
         console.error(boxErr);
-        setToast({ message: 'Не удалось загрузить данные: ' + boxErr.message, type: 'error' });
+        setToast({ message: t('loadErrorPrefix') + boxErr.message, type: 'error' });
       }
       if (!box) {
         setErrorMsg(t('boxNotFoundForZoneError'));
@@ -161,11 +171,12 @@ export default function ScanPage() {
         const { data: b, error: boxErr } = await supabase
           .from('delivery_boxes')
           .select('id, code, label')
+          .eq('seller_id', sellerId)
           .eq('id', orderRow.box_id)
           .maybeSingle();
         if (boxErr) {
           console.error(boxErr);
-          setToast({ message: 'Не удалось загрузить данные: ' + boxErr.message, type: 'error' });
+          setToast({ message: t('loadErrorPrefix') + boxErr.message, type: 'error' });
         }
         box = b as BoxRow | null;
       }
@@ -175,11 +186,12 @@ export default function ScanPage() {
   }
 
   async function confirmDrop() {
-    if (!resultOrder || !resultBox) return;
+    if (!resultOrder || !resultBox || !sellerId) return;
     const { error } = await supabase
       .from('orders')
       .update({ dropped_at: new Date().toISOString(), box_id: resultBox.id })
-      .eq('id', resultOrder.id);
+      .eq('id', resultOrder.id)
+      .eq('seller_id', sellerId);
     if (error) {
       alert(t('errorPrefix') + error.message);
       return;
@@ -190,16 +202,23 @@ export default function ScanPage() {
   }
 
   async function confirmPickup() {
-    if (!resultOrder) return;
+    if (!resultOrder || !sellerId) return;
+    const statusChanged = resultOrder.status !== 'in_transit';
     const { error } = await supabase
       .from('orders')
       .update({ accepted_at: new Date().toISOString(), status: 'in_transit' })
-      .eq('id', resultOrder.id);
+      .eq('id', resultOrder.id)
+      .eq('seller_id', sellerId);
     if (error) {
       alert(t('errorPrefix') + error.message);
       return;
     }
     setSuccessMsg(t('pickupConfirmedMsg'));
+    if (statusChanged && resultOrder.client_phone) {
+      const text = waTemplates.order_in_transit({ number: resultOrder.order_number });
+      openWhatsApp(resultOrder.client_phone, text);
+      setToast({ message: t('waSentMsg'), type: 'success' });
+    }
     setResultOrder(null);
     setResultBox(null);
   }
@@ -326,7 +345,7 @@ export default function ScanPage() {
           </p>
           <p className="text-sm text-gray-500 mb-6">
             {t('droppedAtLabel')}{' '}
-            {resultOrder.dropped_at ? new Date(resultOrder.dropped_at).toLocaleString('ru-RU') : '—'}
+            {resultOrder.dropped_at ? new Date(resultOrder.dropped_at).toLocaleString(locale) : '—'}
           </p>
           <button
             onClick={confirmPickup}

@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import 'leaflet-draw';
 import { supabase } from '@/lib/supabase';
-import { checkLimit } from '@/lib/limits';
+import { useLang } from '@/lib/i18n';
 import { Toast } from '@/components/Toast';
 
 const ALMATY_CENTER: [number, number] = [43.238949, 76.889709];
@@ -58,14 +58,14 @@ function escapeHtml(s: string) {
     .replace(/"/g, '&quot;');
 }
 
-function buildPopupHtml(zoneId: string, name: string) {
+function buildPopupHtml(zoneId: string, name: string, deleteLabel: string) {
   return `
     <div style="min-width:160px">
       <b>${escapeHtml(name)}</b><br/>
       <button data-delete-zone="${zoneId}"
         style="margin-top:6px;background:#dc2626;color:#fff;border:none;
         padding:5px 12px;border-radius:6px;font-weight:600;cursor:pointer">
-        🗑 Удалить зону</button>
+        ${escapeHtml(deleteLabel)}</button>
     </div>`;
 }
 
@@ -111,6 +111,7 @@ function cellToGeoJSON(cell: [number, number][]): GeoJSON.Polygon {
 }
 
 export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }) {
+  const { t } = useLang();
   const mapRef = useRef<L.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
@@ -211,19 +212,13 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     map.on((L as any).Draw.Event.CREATED, async (e: any) => {
       const layer = e.layer as L.Polygon;
 
-      const name = window.prompt('Название зоны:');
+      const name = window.prompt(t('zoneNamePromptLabel'));
       if (!name || !name.trim()) return;
       const trimmed = name.trim();
 
       const sellerId = await getSellerId();
       if (!sellerId) {
-        alert('Не удалось определить продавца, обновите страницу и попробуйте снова');
-        return;
-      }
-
-      const { allowed, max } = await checkLimit(sellerId, 'zones');
-      if (!allowed) {
-        alert(`Достигнут лимит ${max} зон на плане Free. Улучшите план на странице Профиль.`);
+        alert(t('resolveSellerErrorMsg'));
         return;
       }
 
@@ -243,7 +238,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
       if (error || !data) {
         console.error('Ошибка сохранения зоны:', error);
-        alert('Ошибка сохранения зоны: ' + (error?.message || 'unknown'));
+        alert(t('zoneSaveErrorPrefix') + (error?.message || 'unknown'));
         return;
       }
 
@@ -252,7 +247,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       zoneLayersRef.current.set(data.id, layer);
       attachZoneInteractions(layer, data.id, trimmed);
       setZonesCount((c) => c + 1);
-      setToast({ message: 'Зона успешно сохранена', type: 'success' });
+      setToast({ message: t('zoneSavedMsg'), type: 'success' });
     });
 
     map.on((L as any).Draw.Event.EDITED, (e: any) => {
@@ -261,11 +256,13 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         const meta = layerMetaRef.current.get(L.Util.stamp(layer));
         if (!meta) return;
         const geojson = layer.toGeoJSON().geometry;
+        const ownerId = await getSellerId();
         const { error } = await supabase
           .from('zones')
           .update({ coordinates: geojson })
-          .eq('id', meta.id);
-        if (error) alert('Ошибка сохранения изменений: ' + error.message);
+          .eq('id', meta.id)
+          .eq('seller_id', ownerId ?? '');
+        if (error) alert(t('zoneChangesSaveErrorPrefix') + error.message);
       });
     });
 
@@ -275,9 +272,14 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         const stamp = L.Util.stamp(layer);
         const meta = layerMetaRef.current.get(stamp);
         if (!meta) return;
-        const { error } = await supabase.from('zones').delete().eq('id', meta.id);
+        const ownerId = await getSellerId();
+        const { error } = await supabase
+          .from('zones')
+          .delete()
+          .eq('id', meta.id)
+          .eq('seller_id', ownerId ?? '');
         if (error) {
-          alert('Ошибка удаления: ' + error.message);
+          alert(t('zonesDeleteError') + error.message);
           return;
         }
         layerMetaRef.current.delete(stamp);
@@ -338,13 +340,13 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   function attachZoneInteractions(layer: L.Polygon, zoneId: string, name: string) {
     layerMetaRef.current.set(L.Util.stamp(layer), { id: zoneId, name });
     layer.bindTooltip(name, { direction: 'center', className: 'zone-tooltip' });
-    layer.bindPopup(buildPopupHtml(zoneId, name));
+    layer.bindPopup(buildPopupHtml(zoneId, name, t('deleteZoneFullBtn')));
 
     layer.on('dblclick', (e: any) => {
       L.DomEvent.stop(e);
       const meta = layerMetaRef.current.get(L.Util.stamp(layer));
       if (!meta) return;
-      const newName = window.prompt('Новое название зоны:', meta.name);
+      const newName = window.prompt(t('newZoneNamePromptLabel'), meta.name);
       if (newName === null) return;
       const trimmed = newName.trim();
       if (!trimmed || trimmed === meta.name) return;
@@ -360,22 +362,32 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   }
 
   async function renameZone(layer: L.Polygon, zoneId: string, newName: string) {
-    const { error } = await supabase.from('zones').update({ name: newName }).eq('id', zoneId);
+    const ownerId = await getSellerId();
+    const { error } = await supabase
+      .from('zones')
+      .update({ name: newName })
+      .eq('id', zoneId)
+      .eq('seller_id', ownerId ?? '');
     if (error) {
-      alert('Ошибка переименования: ' + error.message);
+      alert(t('zoneRenameErrorPrefix') + error.message);
       return;
     }
     layerMetaRef.current.set(L.Util.stamp(layer), { id: zoneId, name: newName });
     layer.setTooltipContent(newName);
-    layer.setPopupContent(buildPopupHtml(zoneId, newName));
+    layer.setPopupContent(buildPopupHtml(zoneId, newName, t('deleteZoneFullBtn')));
   }
 
   async function deleteZone(zoneId: string) {
-    if (!window.confirm('Удалить эту зону?')) return;
+    if (!window.confirm(t('deleteZoneSimpleConfirm'))) return;
 
-    const { error } = await supabase.from('zones').delete().eq('id', zoneId);
+    const ownerId = await getSellerId();
+    const { error } = await supabase
+      .from('zones')
+      .delete()
+      .eq('id', zoneId)
+      .eq('seller_id', ownerId ?? '');
     if (error) {
-      alert('Ошибка удаления: ' + error.message);
+      alert(t('zonesDeleteError') + error.message);
       return;
     }
 
@@ -400,7 +412,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     if (error) {
       console.error('Ошибка загрузки зон:', error);
-      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
+      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
       return;
     }
 
@@ -432,30 +444,30 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     if (!handler) {
       console.error('finishPolygon: не найден активный обработчик рисования полигона');
-      alert('Не найден активный инструмент рисования. Попробуйте начать рисовать зону заново.');
+      alert(t('finishShapeNoHandlerMsg'));
       return;
     }
 
     const markerCount = handler._markers ? handler._markers.length : 0;
     if (markerCount < 3) {
-      alert('Нужно минимум 3 точки, чтобы завершить фигуру');
+      alert(t('minThreePointsMsg'));
       return;
     }
     handler.completeShape();
   }
 
   async function autoLayout() {
-    const input = window.prompt('Размер сетки зон (N×N):', '4');
+    const input = window.prompt(t('gridSizePromptLabel'), '4');
     if (input === null) return;
     const n = parseInt(input, 10);
     if (!Number.isFinite(n) || n < 1 || n > 20) {
-      alert('Введите целое число от 1 до 20');
+      alert(t('invalidGridSizeMsg'));
       return;
     }
 
     if (zonesCountRef.current > 0) {
       const ok = window.confirm(
-        `Уже есть сохранённые зоны (${zonesCountRef.current}). Авторазметка удалит их все и создаст новую сетку. Продолжить?`
+        t('overwriteZonesConfirmMsg').replace('{count}', String(zonesCountRef.current))
       );
       if (!ok) return;
     }
@@ -465,7 +477,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     const sellerId = await getSellerId();
     if (!sellerId) {
-      alert('Не удалось определить продавца, обновите страницу и попробуйте снова');
+      alert(t('resolveSellerErrorMsg'));
       return;
     }
 
@@ -475,7 +487,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         .delete()
         .eq('seller_id', sellerId);
       if (delError) {
-        alert('Ошибка удаления старых зон: ' + delError.message);
+        alert(t('deleteOldZonesErrorPrefix') + delError.message);
         return;
       }
       drawnItems.clearLayers();
@@ -488,7 +500,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     let hadError = false;
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
-      const name = `Зона ${i + 1}`;
+      const name = t('gridZoneNameTemplate').replace('{number}', String(i + 1));
       const color = PALETTE[i % PALETTE.length];
       const geojson = cellToGeoJSON(cell);
 
@@ -512,9 +524,9 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     setZonesCount(() => cells.length);
     if (hadError) {
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
     } else {
-      setToast({ message: 'Зоны успешно созданы', type: 'success' });
+      setToast({ message: t('zonesCreatedMsg'), type: 'success' });
     }
   }
 
@@ -525,7 +537,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       {initError && (
         <div className="absolute top-3 left-3 right-3 z-[2000] bg-red-50 border border-red-300
           text-red-700 rounded-lg shadow-lg px-4 py-3 text-sm">
-          <b>Не удалось загрузить инструмент рисования зон:</b> {initError}
+          <b>{t('initToolErrorPrefix')}</b> {initError}
         </div>
       )}
 
@@ -535,7 +547,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
           className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-blue-600 text-white
             px-4 py-2 rounded-lg shadow-lg font-semibold hover:bg-blue-700"
         >
-          ✓ Завершить фигуру
+          {t('finishShapeBtn')}
         </button>
       )}
 
@@ -544,11 +556,11 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         className="absolute bottom-4 right-4 z-[1000] bg-white px-4 py-2 rounded-xl shadow-lg
           font-bold hover:bg-gray-50"
       >
-        🎯 Авторазметка зон
+        {t('autoLayoutBtn')}
       </button>
 
       <div className="absolute bottom-4 left-3 z-[1000] bg-white rounded-xl shadow-lg px-3 py-2 text-xs text-gray-500">
-        Зон сохранено: {zonesCount}
+        {t('zonesSavedCountLabel').replace('{count}', String(zonesCount))}
       </div>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

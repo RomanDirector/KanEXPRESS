@@ -11,7 +11,8 @@ import { Toast } from '@/components/Toast'
 import type { OrderPoint } from '@/components/ZoneMapEditor'
 
 function MapLoading() {
-  return <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты…</div>
+  const { t } = useLang()
+  return <div className="flex items-center justify-center h-96 text-gray-400">{t('mapLoadingGeneric')}</div>
 }
 
 const ZoneMapEditor = dynamic(() => import('@/components/ZoneMapEditor'), {
@@ -32,14 +33,21 @@ export default function DeliveryZonesPage() {
       .then((zones) => setZoneCount(zones.length))
       .catch((error) => {
         console.error(error)
-        setToast({ message: 'Не удалось загрузить данные: ' + (error?.message || String(error)), type: 'error' })
+        setToast({ message: t('loadErrorPrefix') + (error?.message || String(error)), type: 'error' })
       })
   }, [])
 
-  // Заказы поверх зон — тот же запрос без фильтра по продавцу, что и на /orders-map.
+  // Заказы поверх зон — только свои, отфильтрованы по seller_id текущей сессии.
   useEffect(() => {
     const fetchOrders = async () => {
-      const { data, error } = await supabase.from('orders').select('*')
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_number, client_address, lat, lng, status')
+        .eq('seller_id', user.id)
       if (error) {
         console.error(error.message)
         return
@@ -64,7 +72,9 @@ export default function DeliveryZonesPage() {
     setResult(null)
     const { assigned, unassigned } = await assignZonesToOrders()
     setAssigning(false)
-    setResult(`Распределено: ${assigned}, не распределено: ${unassigned}`)
+    setResult(
+      t('zonesAssignResultMsg').replace('{assigned}', String(assigned)).replace('{unassigned}', String(unassigned))
+    )
   }
 
   const noZones = zoneCount === 0
@@ -85,13 +95,13 @@ export default function DeliveryZonesPage() {
         </div>
         <div className="flex items-center gap-3">
           {noZones && (
-            <span className="text-sm text-amber-600 font-semibold">Сначала нарисуйте хотя бы одну зону на карте</span>
+            <span className="text-sm text-amber-600 font-semibold">{t('drawZoneFirstMsg')}</span>
           )}
           {result && <span className="text-sm text-green-600 font-semibold">{result}</span>}
           <button
             onClick={handleAssign}
             disabled={assigning || noZones}
-            title={noZones ? 'Сначала нарисуйте хотя бы одну зону на карте' : undefined}
+            title={noZones ? t('drawZoneFirstMsg') : undefined}
             className="px-4 py-2 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50"
           >
             {assigning ? t('zonesAssigning') : t('zonesAssignBtn')}

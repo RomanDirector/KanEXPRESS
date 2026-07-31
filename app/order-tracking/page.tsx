@@ -40,27 +40,35 @@ const TERMINAL_STAGES: CourierStage[] = ['delivered', 'returned', 'cancelled']
 
 export default function OrderTrackingPage() {
   const [orderNumber, setOrderNumber] = useState('')
+  const [phoneLast4, setPhoneLast4] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<TrackResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault()
-    const trimmed = orderNumber.trim()
-    if (!trimmed) return
+    const trimmedOrder = orderNumber.trim()
+    const trimmedPhone = phoneLast4.trim()
+    if (!trimmedOrder || !/^\d{4}$/.test(trimmedPhone)) return
 
     setLoading(true)
     setError(null)
     setResult(null)
 
     try {
-      const res = await fetch(`/api/track-order?order_number=${encodeURIComponent(trimmed)}`)
-      const data = await res.json()
+      const res = await fetch(
+        `/api/track-order?order_number=${encodeURIComponent(trimmedOrder)}&phone_last4=${encodeURIComponent(trimmedPhone)}`
+      )
 
-      if (!res.ok) {
-        setError(data.error || 'Не удалось выполнить поиск заказа')
+      if (res.status === 404) {
+        setResult({ found: false })
       } else {
-        setResult(data as TrackResult)
+        const data = await res.json()
+        if (!res.ok) {
+          setError(data.error || 'Не удалось выполнить поиск заказа')
+        } else {
+          setResult(data as TrackResult)
+        }
       }
     } catch {
       setError('Не удалось связаться с сервером, попробуйте ещё раз')
@@ -81,7 +89,7 @@ export default function OrderTrackingPage() {
           Отследить заказ
         </h1>
         <p className="mt-2 text-center text-sm text-gray-400">
-          Введите номер заказа, чтобы узнать статус доставки
+          Введите номер заказа и последние 4 цифры телефона, чтобы узнать статус доставки
         </p>
 
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-800">
@@ -92,7 +100,7 @@ export default function OrderTrackingPage() {
           </p>
         </div>
 
-        <form onSubmit={handleSearch} className="mt-6 flex gap-3">
+        <form onSubmit={handleSearch} className="mt-6 flex flex-col gap-3 sm:flex-row">
           <input
             type="text"
             value={orderNumber}
@@ -100,10 +108,20 @@ export default function OrderTrackingPage() {
             placeholder="Номер заказа"
             className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition-colors focus:border-primary"
           />
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={4}
+            value={phoneLast4}
+            onChange={(e) => setPhoneLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            placeholder="Последние 4 цифры телефона"
+            aria-label="Последние 4 цифры номера телефона"
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition-colors focus:border-primary sm:w-56"
+          />
           <button
             type="submit"
-            disabled={loading || !orderNumber.trim()}
-            className="flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+            disabled={loading || !orderNumber.trim() || !/^\d{4}$/.test(phoneLast4.trim())}
+            className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
           >
             <Search size={16} />
             {loading ? 'Ищем...' : 'Найти'}

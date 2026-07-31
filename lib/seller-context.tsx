@@ -12,6 +12,7 @@ export interface SellerProfile {
   kaspi_token: string | null
   kaspi_shop_id: string | null
   created_at: string
+  company_logo_url: string | null
 }
 
 export const SellerContext = createContext<SellerProfile | null>(null)

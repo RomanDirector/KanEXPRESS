@@ -27,26 +27,41 @@ export default function CancelledOrdersPage() {
   const [filterDate, setFilterDate] = useState('')
 
   useEffect(() => {
-    const fetchOrders = async () => {
+    let cancelled = false
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    const fetchOrders = async (sellerId: string) => {
       setLoading(true)
       const { data, error } = await supabase
         .from('orders')
         .select('id, order_number, client_address, cancel_reason, cancelled_by, cancelled_at')
+        .eq('seller_id', sellerId)
         .eq('courier_stage', 'cancelled')
         .order('cancelled_at', { ascending: false })
       if (error) console.error(error.message)
       else setOrders(data as CancelledOrder[])
       setLoading(false)
     }
-    fetchOrders()
 
-    const channel = supabase
-      .channel('seller-cancelled-orders-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchOrders)
-      .subscribe()
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (cancelled || !user) return
+      await fetchOrders(user.id)
+      channel = supabase
+        .channel('seller-cancelled-orders-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders', filter: `seller_id=eq.${user.id}` },
+          () => fetchOrders(user.id)
+        )
+        .subscribe()
+    })()
 
     return () => {
-      supabase.removeChannel(channel)
+      cancelled = true
+      if (channel) supabase.removeChannel(channel)
     }
   }, [])
 

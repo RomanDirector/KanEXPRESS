@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useLang } from '@/lib/i18n'
+import { getSellerCourierIds } from '@/lib/couriers'
 import { Toast } from '@/components/Toast'
 
 function MapLoading() {
@@ -34,14 +35,26 @@ export default function TrackingPage() {
 
   async function loadList() {
     setLoading(true)
-    const { data: courierRows, error: courierErr } = await supabase.from('couriers').select('id, full_name, phone')
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      setLoading(false)
+      return
+    }
+    const courierIds = await getSellerCourierIds(user.id)
+    const { data: courierRows, error: courierErr } =
+      courierIds.length === 0
+        ? { data: [] as { id: string; full_name: string; phone: string }[], error: null }
+        : await supabase.from('couriers').select('id, full_name, phone').in('id', courierIds)
     const { data: orderRows, error: orderErr } = await supabase
       .from('orders').select('id, order_number, client_address, courier_name, status')
+      .eq('seller_id', user.id)
       .eq('status', 'in_transit')
     if (courierErr || orderErr) {
       if (courierErr) console.error(courierErr)
       if (orderErr) console.error(orderErr)
-      setToast({ message: 'Не удалось загрузить данные: ' + (courierErr?.message || orderErr?.message), type: 'error' })
+      setToast({ message: t('loadErrorPrefix') + (courierErr?.message || orderErr?.message), type: 'error' })
     }
 
     const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({

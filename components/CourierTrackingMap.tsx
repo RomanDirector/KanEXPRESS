@@ -5,6 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
+import { getSellerCourierIds } from '@/lib/couriers';
 
 const ALMATY_CENTER: [number, number] = [43.238949, 76.889709];
 const DEFAULT_ZOOM = 11;
@@ -60,6 +61,8 @@ export default function CourierTrackingMap() {
   const mapRef = useRef<L.Map | null>(null);
   const courierMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const activeCountsRef = useRef<Map<string, number>>(new Map());
+  const sellerIdRef = useRef<string | null>(null);
+  const sellerCourierIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -81,7 +84,11 @@ export default function CourierTrackingMap() {
         { event: 'UPDATE', schema: 'public', table: 'couriers' },
         (payload) => {
           const c = payload.new as Courier;
-          if (c && c.current_lat != null && c.current_lng != null) upsertCourierMarker(map, c);
+          // couriers — общая таблица без seller_id, поэтому realtime-фильтр по колонке
+          // невозможен; отсекаем чужих курьеров вручную по уже загруженному набору id.
+          if (c && sellerCourierIdsRef.current.has(c.id) && c.current_lat != null && c.current_lng != null) {
+            upsertCourierMarker(map, c);
+          }
         }
       )
       .subscribe();
@@ -98,9 +105,16 @@ export default function CourierTrackingMap() {
   }, []);
 
   async function init(map: L.Map) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    sellerIdRef.current = user.id;
+
     const { data: orderRows } = await supabase
       .from('orders')
       .select('id, order_number, lat, lng, courier_name, status')
+      .eq('seller_id', user.id)
       .eq('status', 'in_transit')
       .not('lat', 'is', null)
       .not('lng', 'is', null);
@@ -121,9 +135,15 @@ export default function CourierTrackingMap() {
   }
 
   async function refreshAll(map: L.Map) {
+    if (!sellerIdRef.current) return;
+    const courierIds = await getSellerCourierIds(sellerIdRef.current);
+    sellerCourierIdsRef.current = new Set(courierIds);
+    if (courierIds.length === 0) return;
+
     const { data: couriers } = await supabase
       .from('couriers')
       .select('id, full_name, phone, status, current_lat, current_lng, location_updated_at')
+      .in('id', courierIds)
       .not('current_lat', 'is', null)
       .not('current_lng', 'is', null);
 
