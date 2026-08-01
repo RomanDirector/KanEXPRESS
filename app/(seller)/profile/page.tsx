@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { LogOut, Crown, Pencil, ArrowLeft, Camera, Image as ImageIcon, Trash2 } from 'lucide-react'
+import { LogOut, Crown, Pencil, ArrowLeft, Camera, Image as ImageIcon, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { computeSubscriptionStatus } from '@/lib/limits'
 import { useLang, localeTag } from '@/lib/i18n'
@@ -425,10 +425,10 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-3xl mx-auto px-8 pt-6">
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-md">
           <h2 className="text-sm font-bold text-gray-900 mb-4">{t('brandingTitle')}</h2>
-          <div className="flex items-center gap-4">
-            <div className="w-24 h-24 shrink-0 rounded-xl border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-28 h-28 shrink-0 rounded-xl border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50 shadow-inner">
               {seller?.company_logo_url ? (
                 <img
                   src={seller.company_logo_url}
@@ -437,13 +437,14 @@ export default function ProfilePage() {
                 />
               ) : (
                 <div className="flex flex-col items-center gap-1 text-gray-300">
-                  <ImageIcon size={24} />
+                  <ImageIcon size={28} />
                   <span className="text-[10px] text-gray-400 text-center px-1">{t('logoNotUploadedLabel')}</span>
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
-              <label className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all cursor-pointer">
+            <div className="flex items-center gap-2">
+              <label className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all cursor-pointer inline-flex items-center gap-1.5">
+                <Upload size={14} />
                 {uploadingLogo ? t('uploadingLabel') : t('uploadLogoBtn')}
                 <input
                   type="file"

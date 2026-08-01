@@ -50,26 +50,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Параметр ruleId обязателен' }, { status: 400 })
   }
 
-  const admin = createAdminClient()
+  let admin: ReturnType<typeof createAdminClient>
+  let rule: { id: string; seller_id: string; product_name: string; sku: string | null; current_price: number }
+  try {
+    admin = createAdminClient()
 
-  // seller_id берём из самого правила, а не из тела запроса — телу запроса не доверяем.
-  const { data: rule, error: ruleErr } = await admin
-    .from('demping_rules')
-    .select('id, seller_id, product_name, sku, current_price')
-    .eq('id', ruleId)
-    .maybeSingle()
+    // seller_id берём из самого правила, а не из тела запроса — телу запроса не доверяем.
+    const { data: ruleData, error: ruleErr } = await admin
+      .from('demping_rules')
+      .select('id, seller_id, product_name, sku, current_price')
+      .eq('id', ruleId)
+      .maybeSingle()
 
-  if (ruleErr || !rule) {
-    return NextResponse.json({ error: 'Правило не найдено' }, { status: 404 })
+    if (ruleErr || !ruleData) {
+      return NextResponse.json({ error: 'Правило не найдено' }, { status: 404 })
+    }
+    rule = ruleData
+  } catch (err) {
+    console.error('[kaspi/price] init failed:', err)
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })
   }
 
   if (rule.seller_id !== user.id) {
     return NextResponse.json({ error: 'Доступ запрещён' }, { status: 403 })
   }
 
-  // Демпинг — платная функция (Часть Д ТЗ). Блокировка на клиенте — это только UI,
-  // без этой проверки истёкшую подписку можно обойти через DevTools, вызвав роут напрямую.
-  const subscription = await getSubscriptionState(user.id, admin)
+  let subscription: Awaited<ReturnType<typeof getSubscriptionState>>
+  try {
+    // Демпинг — платная функция (Часть Д ТЗ). Блокировка на клиенте — это только UI,
+    // без этой проверки истёкшую подписку можно обойти через DevTools, вызвав роут напрямую.
+    subscription = await getSubscriptionState(user.id, admin)
+  } catch (err) {
+    console.error('[kaspi/price] subscription check failed:', err)
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })
+  }
   if (subscription.status === 'expired') {
     return NextResponse.json({ error: 'Подписка истекла, публикация цены недоступна' }, { status: 403 })
   }

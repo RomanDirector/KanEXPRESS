@@ -51,6 +51,12 @@ export default function StaffPage() {
   const [assignCourierId, setAssignCourierId] = useState('')
   const [assignZoneId, setAssignZoneId] = useState('')
   const [assigning, setAssigning] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  const showToast = (message: string) => {
+    setToastMessage(message)
+    setTimeout(() => setToastMessage(null), 3500)
+  }
 
   // Курьеры, привязанные к зонам текущего продавца — join через courier_zones/zones,
   // а не прямой select('*') из couriers (курьеры общие на всю систему).
@@ -125,7 +131,12 @@ export default function StaffPage() {
       .insert({ courier_id: assignCourierId, zone_id: assignZoneId })
     setAssigning(false)
     if (error) {
-      alert('Ошибка привязки: ' + error.message)
+      const isDuplicate = error.code === '23505' || error.message.includes('courier_zones_courier_id_zone_id_key')
+      if (isDuplicate) {
+        showToast('Этот курьер уже привязан к этой зоне')
+      } else {
+        alert('Ошибка привязки: ' + error.message)
+      }
       return
     }
     setShowAssignModal(false)
@@ -355,6 +366,12 @@ export default function StaffPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[60] bg-gray-900 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg">
+          {toastMessage}
         </div>
       )}
     </div>
