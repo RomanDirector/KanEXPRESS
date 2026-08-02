@@ -56,13 +56,6 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
             <span className="text-red-600">Kan</span>
             <span className="text-gray-900">EXPRESS</span>
           </span>
-          {seller.company_logo_url && (
-            <img
-              src={seller.company_logo_url}
-              alt=""
-              className="h-7 object-contain"
-            />
-          )}
         </div>
         <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wider">{t('sellerPanel')}</p>
       </div>
@@ -109,6 +102,16 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 
       {/* Низ sidebar */}
       <div className="px-2">
+        {seller.company_logo_url && (
+          <div className="flex items-center gap-2 px-1 mb-2">
+            <img
+              src={seller.company_logo_url}
+              alt=""
+              className="w-8 h-8 rounded-full object-contain border border-gray-200 bg-white flex-shrink-0"
+            />
+            <span className="text-xs font-semibold text-gray-700 truncate">{seller.organization_name}</span>
+          </div>
+        )}
         <div className="bg-red-50 rounded-xl p-3 border border-red-100">
           <p className="text-xs font-bold text-red-600">KanExpress</p>
           <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>

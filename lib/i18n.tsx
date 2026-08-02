@@ -375,6 +375,26 @@ const translations = {
     iPaidBtn: 'Я оплатил',
     manualPaymentNoteMsg: 'Оплата подтверждается вручную — это временная заглушка.',
     paymentErrorPrefix: 'Ошибка оплаты: ',
+
+    // публичная страница отслеживания заказа
+    trackOrderTitle: 'Отследить заказ',
+    trackOrderSubtitle: 'Введите номер заказа и последние 4 цифры телефона, чтобы узнать статус доставки',
+    trackInfoText:
+      'Доставка осуществляется по маршруту в порядке очереди с 09:00 до 20:00. Актуальный статус отображается после начала маршрута.',
+    trackOrderNumberPlaceholder: 'Номер заказа',
+    trackPhoneLast4Placeholder: 'Последние 4 цифры телефона',
+    trackPhoneLast4AriaLabel: 'Последние 4 цифры номера телефона',
+    trackSearchingLabel: 'Ищем...',
+    trackSearchErrorMsg: 'Не удалось выполнить поиск заказа',
+    trackServerErrorMsg: 'Не удалось связаться с сервером, попробуйте ещё раз',
+    trackNotFoundMsg: 'Заказ с таким номером не найден, проверьте номер',
+    trackQueuePositionMsg: 'Ваш заказ #{position} в очереди у курьера',
+    trackStageNotStarted: 'Ожидает выезда курьера',
+    trackStageDeparted: 'Курьер в пути',
+    trackStageArrived: 'Курьер на месте',
+    trackStageDelivered: 'Доставлено',
+    trackStageReturned: 'Возврат',
+    trackStageCancelled: 'Заказ отменён',
   },
   kz: {
     dashboard: 'Менің тапсырыстарым',
@@ -740,6 +760,26 @@ const translations = {
     iPaidBtn: 'Мен төледім',
     manualPaymentNoteMsg: 'Төлем қолмен расталады — бұл уақытша шешім.',
     paymentErrorPrefix: 'Төлем қатесі: ',
+
+    // публичная страница отслеживания заказа
+    trackOrderTitle: 'Тапсырысты бақылау',
+    trackOrderSubtitle: 'Жеткізу мәртебесін білу үшін тапсырыс нөмірін және телефонның соңғы 4 санын енгізіңіз',
+    trackInfoText:
+      'Жеткізу 09:00-ден 20:00-ге дейін кезек тәртібімен бағыт бойынша жүзеге асырылады. Ағымдағы мәртебе бағыт басталғаннан кейін көрсетіледі.',
+    trackOrderNumberPlaceholder: 'Тапсырыс нөмірі',
+    trackPhoneLast4Placeholder: 'Телефонның соңғы 4 саны',
+    trackPhoneLast4AriaLabel: 'Телефон нөмірінің соңғы 4 саны',
+    trackSearchingLabel: 'Іздеп жатырмыз...',
+    trackSearchErrorMsg: 'Тапсырысты іздеу мүмкін болмады',
+    trackServerErrorMsg: 'Сервермен байланысу мүмкін болмады, қайталап көріңіз',
+    trackNotFoundMsg: 'Мұндай нөмірлі тапсырыс табылмады, нөмірді тексеріңіз',
+    trackQueuePositionMsg: 'Сіздің тапсырысыңыз #{position} курьер кезегінде',
+    trackStageNotStarted: 'Курьердің шығуын күтуде',
+    trackStageDeparted: 'Курьер жолда',
+    trackStageArrived: 'Курьер орында',
+    trackStageDelivered: 'Жеткізілді',
+    trackStageReturned: 'Қайтарылды',
+    trackStageCancelled: 'Тапсырыс бас тартылды',
   },
 }
 
