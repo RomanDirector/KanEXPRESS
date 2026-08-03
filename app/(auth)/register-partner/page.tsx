@@ -6,12 +6,17 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Navbar } from '@/components/layout/navbar'
+import { useLang } from '@/lib/i18n'
 
 export default function RegisterPartnerPage() {
+  const { t } = useLang()
   const [form, setForm] = useState({
     phone: '', email: '', firstName: '', lastName: '',
     middleName: '', password: '', confirmPassword: '',
   })
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -30,7 +35,30 @@ export default function RegisterPartnerPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO: логика отправки
+    setSubmitError('')
+    setSubmitting(true)
+
+    try {
+      const res = await fetch('/api/partner-lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: form.phone,
+          email: form.email,
+          firstName: form.firstName,
+          lastName: form.lastName,
+          middleName: form.middleName,
+        }),
+      })
+
+      if (!res.ok) throw new Error()
+
+      setSubmitted(true)
+    } catch {
+      setSubmitError(t('partnerLeadErrorMsg'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -51,49 +79,58 @@ export default function RegisterPartnerPage() {
               <Link href="/login" className="text-primary hover:underline font-medium">Войти</Link>
             </p>
 
-            <form onSubmit={handleSubmit} className="mt-8 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Номер телефона *</Label>
-                  <Input name="phone" value={form.phone} onChange={handlePhone} placeholder="+7 (___) ___-__-__" required />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
-                  <Input type="email" name="email" value={form.email} onChange={handleChange} placeholder="you@example.com" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Имя</Label>
-                  <Input name="firstName" value={form.firstName} onChange={handleChange} placeholder="Имя" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Фамилия</Label>
-                  <Input name="lastName" value={form.lastName} onChange={handleChange} placeholder="Фамилия" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Отчество</Label>
-                  <Input name="middleName" value={form.middleName} onChange={handleChange} placeholder="Введите ваше отчество (если есть)" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Пароль</Label>
-                  <Input type="password" name="password" value={form.password} onChange={handleChange} placeholder="Минимум 8 символов" />
-                </div>
-
-                <div className="col-span-2 space-y-1.5">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Подтвердите пароль</Label>
-                  <Input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Повторите пароль" />
-                </div>
+            {submitted ? (
+              <div className="mt-8 text-center py-8">
+                <p className="text-lg font-medium text-gray-900">{t('partnerLeadSuccessTitle')}</p>
+                <p className="mt-2 text-sm text-gray-400">{t('partnerLeadSuccessMsg')}</p>
               </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
 
-              <Button type="submit" className="w-full rounded-full py-6 text-base font-semibold">
-                Стать партнёром
-              </Button>
-            </form>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Номер телефона *</Label>
+                    <Input name="phone" value={form.phone} onChange={handlePhone} placeholder="+7 (___) ___-__-__" required />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
+                    <Input type="email" name="email" value={form.email} onChange={handleChange} placeholder="you@example.com" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Имя</Label>
+                    <Input name="firstName" value={form.firstName} onChange={handleChange} placeholder="Имя" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Фамилия</Label>
+                    <Input name="lastName" value={form.lastName} onChange={handleChange} placeholder="Фамилия" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Отчество</Label>
+                    <Input name="middleName" value={form.middleName} onChange={handleChange} placeholder="Введите ваше отчество (если есть)" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Пароль</Label>
+                    <Input type="password" name="password" value={form.password} onChange={handleChange} placeholder="Минимум 8 символов" />
+                  </div>
+
+                  <div className="col-span-2 space-y-1.5">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Подтвердите пароль</Label>
+                    <Input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} placeholder="Повторите пароль" />
+                  </div>
+                </div>
+
+                {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+
+                <Button type="submit" disabled={submitting} className="w-full rounded-full py-6 text-base font-semibold">
+                  {submitting ? t('partnerFormSendingLabel') : 'Стать партнёром'}
+                </Button>
+              </form>
+            )}
           </div>
 
           {/* Правая колонка — тёмная sticky карточка */}

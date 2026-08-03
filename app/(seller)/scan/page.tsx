@@ -44,6 +44,8 @@ export default function ScanPage() {
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
@@ -127,83 +129,90 @@ export default function ScanPage() {
     resetResult();
     if (!orderNumber || !sellerId) return;
 
-    const { data: order, error } = await supabase
-      .from('orders')
-      .select('id, order_number, client_phone, zone_id, box_id, dropped_at, accepted_at, status, zones ( name, color )')
-      .eq('seller_id', sellerId)
-      .eq('order_number', orderNumber)
-      .maybeSingle();
-
-    if (error) {
-      console.error(error);
-      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
-    }
-
-    if (!order) {
-      setErrorMsg(t('orderNotFoundError'));
-      return;
-    }
-
-    const orderRow = order as unknown as OrderRow;
-
-    if (mode === 'drop') {
-      if (!orderRow.zone_id) {
-        setErrorMsg(t('zoneNotAssignedError'));
-        return;
-      }
-      const { data: box, error: boxErr } = await supabase
-        .from('delivery_boxes')
-        .select('id, code, label')
+    setLooking(true);
+    try {
+      const { data: order, error } = await supabase
+        .from('orders')
+        .select('id, order_number, client_phone, zone_id, box_id, dropped_at, accepted_at, status, zones ( name, color )')
         .eq('seller_id', sellerId)
-        .eq('zone_id', orderRow.zone_id)
-        .limit(1)
+        .eq('order_number', orderNumber)
         .maybeSingle();
-      if (boxErr) {
-        console.error(boxErr);
-        setToast({ message: t('loadErrorPrefix') + boxErr.message, type: 'error' });
+
+      if (error) {
+        console.error(error);
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
       }
-      if (!box) {
-        setErrorMsg(t('boxNotFoundForZoneError'));
+
+      if (!order) {
+        setErrorMsg(t('orderNotFoundError'));
         return;
       }
-      setResultOrder(orderRow);
-      setResultBox(box as BoxRow);
-    } else {
-      if (!orderRow.dropped_at) {
-        setErrorMsg(t('notDroppedYetError'));
-        return;
-      }
-      if (orderRow.accepted_at) {
-        setAlreadyAccepted(true);
-        setResultOrder(orderRow);
-        return;
-      }
-      let box: BoxRow | null = null;
-      if (orderRow.box_id) {
-        const { data: b, error: boxErr } = await supabase
+
+      const orderRow = order as unknown as OrderRow;
+
+      if (mode === 'drop') {
+        if (!orderRow.zone_id) {
+          setErrorMsg(t('zoneNotAssignedError'));
+          return;
+        }
+        const { data: box, error: boxErr } = await supabase
           .from('delivery_boxes')
           .select('id, code, label')
           .eq('seller_id', sellerId)
-          .eq('id', orderRow.box_id)
+          .eq('zone_id', orderRow.zone_id)
+          .limit(1)
           .maybeSingle();
         if (boxErr) {
           console.error(boxErr);
           setToast({ message: t('loadErrorPrefix') + boxErr.message, type: 'error' });
         }
-        box = b as BoxRow | null;
+        if (!box) {
+          setErrorMsg(t('boxNotFoundForZoneError'));
+          return;
+        }
+        setResultOrder(orderRow);
+        setResultBox(box as BoxRow);
+      } else {
+        if (!orderRow.dropped_at) {
+          setErrorMsg(t('notDroppedYetError'));
+          return;
+        }
+        if (orderRow.accepted_at) {
+          setAlreadyAccepted(true);
+          setResultOrder(orderRow);
+          return;
+        }
+        let box: BoxRow | null = null;
+        if (orderRow.box_id) {
+          const { data: b, error: boxErr } = await supabase
+            .from('delivery_boxes')
+            .select('id, code, label')
+            .eq('seller_id', sellerId)
+            .eq('id', orderRow.box_id)
+            .maybeSingle();
+          if (boxErr) {
+            console.error(boxErr);
+            setToast({ message: t('loadErrorPrefix') + boxErr.message, type: 'error' });
+          }
+          box = b as BoxRow | null;
+        }
+        setResultOrder(orderRow);
+        setResultBox(box);
       }
-      setResultOrder(orderRow);
-      setResultBox(box);
+    } finally {
+      setLooking(false);
     }
   }
 
   async function confirmDrop() {
     if (!resultOrder || !resultBox || !sellerId) return;
+    setConfirming(true);
     const { error } = await supabase
       .from('orders')
       .update({ dropped_at: new Date().toISOString(), box_id: resultBox.id })
       .eq('id', resultOrder.id)
       .eq('seller_id', sellerId);
+    setConfirming(false);
     if (error) {
       alert(t('errorPrefix') + error.message);
       return;
@@ -216,11 +225,13 @@ export default function ScanPage() {
   async function confirmPickup() {
     if (!resultOrder || !sellerId) return;
     const statusChanged = resultOrder.status !== 'in_transit';
+    setConfirming(true);
     const { error } = await supabase
       .from('orders')
       .update({ accepted_at: new Date().toISOString(), status: 'in_transit' })
       .eq('id', resultOrder.id)
       .eq('seller_id', sellerId);
+    setConfirming(false);
     if (error) {
       alert(t('errorPrefix') + error.message);
       return;
@@ -301,12 +312,17 @@ export default function ScanPage() {
           </label>
           <button
             onClick={() => lookupOrder(extractOrderNumber(manualNumber))}
-            className="px-4 py-2 rounded border text-sm font-semibold"
+            disabled={looking}
+            className="px-4 py-2 rounded border text-sm font-semibold disabled:opacity-50"
           >
-            {t('findOrderBtn')}
+            {looking ? t('loading') : t('findOrderBtn')}
           </button>
         </div>
       </div>
+
+      {!errorMsg && !successMsg && !resultOrder && (
+        <p className="text-sm text-gray-400 text-center py-6">{t('scanEmptyHintMsg')}</p>
+      )}
 
       {errorMsg && (
         <div className="flex items-center gap-2 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 mb-4">
@@ -338,9 +354,10 @@ export default function ScanPage() {
           </p>
           <button
             onClick={confirmDrop}
-            className="px-6 py-3 rounded-xl bg-green-600 text-white font-bold text-lg hover:bg-green-700"
+            disabled={confirming}
+            className="px-6 py-3 rounded-xl bg-green-600 text-white font-bold text-lg hover:bg-green-700 disabled:opacity-50"
           >
-            {t('confirmDropBtn')}
+            {confirming ? t('loading') : t('confirmDropBtn')}
           </button>
         </div>
       )}
@@ -359,9 +376,10 @@ export default function ScanPage() {
           </p>
           <button
             onClick={confirmPickup}
-            className="px-6 py-3 rounded-xl bg-green-600 text-white font-bold text-lg hover:bg-green-700"
+            disabled={confirming}
+            className="px-6 py-3 rounded-xl bg-green-600 text-white font-bold text-lg hover:bg-green-700 disabled:opacity-50"
           >
-            {t('confirmPickupBtn')}
+            {confirming ? t('loading') : t('confirmPickupBtn')}
           </button>
         </div>
       )}

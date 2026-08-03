@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { Phone, Trash2, Wallet, Users, Link2, X, Warehouse } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 import { useSeller } from '@/lib/seller-context'
+import { Toast } from '@/components/Toast'
 
 interface Courier {
   id: string
@@ -51,6 +53,9 @@ export default function StaffPage() {
   const [assignCourierId, setAssignCourierId] = useState('')
   const [assignZoneId, setAssignZoneId] = useState('')
   const [assigning, setAssigning] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [unassigningId, setUnassigningId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [warehouseAddress, setWarehouseAddress] = useState('')
   const [warehouseCoords, setWarehouseCoords] = useState<{ lat: number; lng: number } | null>(null)
@@ -66,6 +71,7 @@ export default function StaffPage() {
       .eq('zones.seller_id', seller.id)
     if (error) {
       console.error(error.message)
+      setToast({ message: 'Не удалось загрузить курьеров: ' + error.message, type: 'error' })
       return
     }
 
@@ -134,10 +140,19 @@ export default function StaffPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seller.id])
 
+  useEffect(() => {
+    if (!showAssignModal) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAssignModal(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showAssignModal])
+
   const saveWarehouseAddress = async () => {
     const trimmed = warehouseAddress.trim()
     if (!trimmed) {
-      alert('Укажите адрес склада')
+      setToast({ message: 'Укажите адрес склада', type: 'error' })
       return
     }
 
@@ -153,7 +168,7 @@ export default function StaffPage() {
 
     if (!result.success) {
       setSavingWarehouse(false)
-      alert('Не удалось определить координаты: ' + (result.error || ''))
+      setToast({ message: 'Не удалось определить координаты: ' + (result.error || ''), type: 'error' })
       return
     }
 
@@ -165,7 +180,7 @@ export default function StaffPage() {
     setSavingWarehouse(false)
 
     if (error) {
-      alert('Ошибка сохранения: ' + error.message)
+      setToast({ message: 'Ошибка сохранения: ' + error.message, type: 'error' })
       return
     }
 
@@ -188,7 +203,12 @@ export default function StaffPage() {
       .insert({ courier_id: assignCourierId, zone_id: assignZoneId })
     setAssigning(false)
     if (error) {
-      alert('Ошибка привязки: ' + error.message)
+      const isDuplicate = error.code === '23505' || error.message.includes('courier_zones_courier_id_zone_id_key')
+      if (isDuplicate) {
+        setToast({ message: 'Этот курьер уже привязан к этой зоне', type: 'error' })
+      } else {
+        setToast({ message: 'Ошибка привязки: ' + error.message, type: 'error' })
+      }
       return
     }
     setShowAssignModal(false)
@@ -196,9 +216,11 @@ export default function StaffPage() {
   }
 
   const unassignZone = async (linkId: string) => {
+    setUnassigningId(linkId)
     const { error } = await supabase.from('courier_zones').delete().eq('id', linkId)
+    setUnassigningId(null)
     if (error) {
-      alert('Ошибка удаления привязки: ' + error.message)
+      setToast({ message: 'Ошибка удаления привязки: ' + error.message, type: 'error' })
       return
     }
     fetchCouriers()
@@ -206,7 +228,13 @@ export default function StaffPage() {
 
   const deleteCourier = async (id: string) => {
     if (!confirm('Удалить курьера?')) return
-    await supabase.from('couriers').delete().eq('id', id)
+    setDeletingId(id)
+    const { error } = await supabase.from('couriers').delete().eq('id', id)
+    setDeletingId(null)
+    if (error) {
+      setToast({ message: 'Ошибка удаления курьера: ' + error.message, type: 'error' })
+      return
+    }
     fetchCouriers()
   }
 
@@ -277,6 +305,18 @@ export default function StaffPage() {
           </div>
         </div>
 
+        {!loading && sellerZones.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-amber-200 p-8 text-center shadow-sm">
+            <p className="text-sm text-gray-600 mb-4">{t('staffNoZonesMsg')}</p>
+            <Link
+              href="/delivery-zones"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
+            >
+              {t('goToZonesBtn')}
+            </Link>
+          </div>
+        ) : (
+          <>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white shadow-sm shadow-red-200">
             <Users size={16} />
@@ -293,6 +333,10 @@ export default function StaffPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
+        ) : allCouriers.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center shadow-sm">
+            <p className="text-sm text-gray-500">{t('staffNoCourierPoolMsg')}</p>
+          </div>
         ) : (
 
           /* ===== ТАБЛИЦА КУРЬЕРОВ ===== */
@@ -344,7 +388,8 @@ export default function StaffPage() {
                             {link.zone_name}
                             <button
                               onClick={() => unassignZone(link.id)}
-                              className="hover:opacity-70"
+                              disabled={unassigningId === link.id}
+                              className="hover:opacity-70 disabled:opacity-30"
                               title="Отвязать зону"
                             >
                               <X size={12} />
@@ -367,7 +412,8 @@ export default function StaffPage() {
                         </button>
                         <button
                           onClick={() => deleteCourier(c.id)}
-                          className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                          disabled={deletingId === c.id}
+                          className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
                         >
                           <Trash2 size={13} />
                           {t('delete')}
@@ -379,6 +425,8 @@ export default function StaffPage() {
               </tbody>
             </table>
           </div>
+        )}
+          </>
         )}
       </main>
 
@@ -449,6 +497,8 @@ export default function StaffPage() {
           </div>
         </div>
       )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

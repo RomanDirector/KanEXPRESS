@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 import * as XLSX from 'xlsx';
@@ -42,6 +42,15 @@ export default function ArchivePage() {
   useEffect(() => {
     load();
   }, [tab]);
+
+  useEffect(() => {
+    if (!photoOrder) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPhotoOrder(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [photoOrder]);
 
   async function load() {
     setLoading(true);
@@ -257,7 +266,8 @@ export default function ArchivePage() {
             {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="p-6 text-center text-gray-500">
-                  {t('noOrders')}
+                  <p>{t('noOrders')}</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('archiveEmptyMsg')}</p>
                 </td>
               </tr>
             )}
@@ -290,9 +300,16 @@ export default function ArchivePage() {
           onClick={() => setPhotoOrder(null)}
         >
           <div
-            className="bg-white rounded-xl p-6 w-96 shadow-2xl"
+            className="relative bg-white rounded-xl p-6 w-96 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              onClick={() => setPhotoOrder(null)}
+              aria-label={t('close')}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700"
+            >
+              <X size={20} />
+            </button>
             <h3 className="font-bold mb-3">
               {t('packagingPhotoTitle').replace('{number}', photoOrder.order_number)}
             </h3>

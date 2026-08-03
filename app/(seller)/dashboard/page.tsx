@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { Package, Truck, CheckCircle, MapPin, RotateCcw, Ban, Search, Calendar, Download, Share2, Shuffle } from 'lucide-react'
+import { Package, Truck, CheckCircle, MapPin, RotateCcw, Ban, Search, Calendar, Download, Share2, Shuffle, RefreshCw } from 'lucide-react'
 import { useLang, localeTag } from '@/lib/i18n'
 import { waTemplates, openWhatsApp, defaultDeliveryWindow } from '@/lib/whatsapp-templates'
 import { getSellerCourierIds } from '@/lib/couriers'
@@ -46,6 +46,15 @@ const STAGE_ICON: Record<DisplayStage, React.ReactNode> = {
 export default function SellerDashboard() {
   const { t, lang } = useLang()
   const locale = localeTag(lang)
+  const STAGE_LABEL_LOCAL: Record<DisplayStage, string> = {
+    not_started: t('stageNotStarted'),
+    dropped: t('stageDropped'),
+    departed: t('stageDeparted'),
+    arrived: t('stageArrived'),
+    delivered: t('stageDelivered'),
+    returned: t('stageReturned'),
+    cancelled: t('stageCancelled'),
+  }
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all')
@@ -55,8 +64,19 @@ export default function SellerDashboard() {
   const [distributing, setDistributing] = useState(false)
   const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
   const [uploading, setUploading] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success'; actionLabel?: string; actionHref?: string } | null>(null)
   const [sellerId, setSellerId] = useState<string | null>(null)
+  const [massUpdating, setMassUpdating] = useState(false)
+  const [syncingKaspi, setSyncingKaspi] = useState(false)
+
+  useEffect(() => {
+    if (!photoOrder) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPhotoOrder(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [photoOrder])
 
   async function refreshOrders() {
     if (!sellerId) return
@@ -144,7 +164,8 @@ export default function SellerDashboard() {
   }
 
   const massSetStatus = async (status: OrderStatus) => {
-    if (selected.size === 0 || !sellerId) return
+    if (selected.size === 0 || !sellerId || massUpdating) return
+    setMassUpdating(true)
     const targetIds = Array.from(selected)
     // Сравниваем с состоянием ДО обновления, чтобы не полагаться на ре-рендер и не отправить WA повторно, если статус фактически не менялся.
     const changedOrders = orders.filter(o => targetIds.includes(o.id) && o.status !== status)
@@ -154,10 +175,12 @@ export default function SellerDashboard() {
       console.error(error)
       setToast({ message: t('saveErrorGeneric'), type: 'error' })
       setSelected(new Set())
+      setMassUpdating(false)
       return
     }
     setToast({ message: t('statusUpdatedMsg'), type: 'success' })
     setSelected(new Set())
+    setMassUpdating(false)
 
     if ((status === 'in_transit' || status === 'delivered') && changedOrders.length > 0) {
       changedOrders.forEach((order, i) => {
@@ -256,6 +279,38 @@ export default function SellerDashboard() {
     setTimeout(() => window.location.reload(), distributed.length * 700 + 500)
   }
 
+  const syncFromKaspi = async () => {
+    if (syncingKaspi) return
+    setSyncingKaspi(true)
+    try {
+      const res = await fetch('/api/kaspi/sync-manual', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setToast({ message: t('syncKaspiErrorPrefix') + (data?.error ?? t('serverErrorGeneric')), type: 'error' })
+        return
+      }
+      const result = data?.results?.[0]
+      if (!result) {
+        setToast({ message: t('syncKaspiErrorPrefix') + t('serverErrorGeneric'), type: 'error' })
+        return
+      }
+      if (result.error === 'kaspi_token не задан') {
+        setToast({ message: t('syncKaspiTokenMissingMsg'), type: 'error', actionLabel: t('goToProfileBtn'), actionHref: '/profile' })
+        return
+      }
+      if (result.error) {
+        setToast({ message: t('syncKaspiErrorPrefix') + result.error, type: 'error' })
+        return
+      }
+      setToast({ message: t('syncKaspiSuccessMsg').replace('{count}', String(result.synced)), type: 'success' })
+      refreshOrders()
+    } catch {
+      setToast({ message: t('syncKaspiErrorPrefix') + t('serverErrorGeneric'), type: 'error' })
+    } finally {
+      setSyncingKaspi(false)
+    }
+  }
+
   const statCounts: Record<OrderStatus, number> = {
     pending:    orders.filter(o => o.status === 'pending').length,
     in_transit: orders.filter(o => o.status === 'in_transit').length,
@@ -326,6 +381,14 @@ export default function SellerDashboard() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={syncFromKaspi}
+            disabled={syncingKaspi}
+            className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 disabled:bg-gray-400 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm"
+          >
+            <RefreshCw size={16} className={syncingKaspi ? 'animate-spin' : ''} />
+            {syncingKaspi ? t('syncingKaspiLabel') : t('syncKaspiBtn')}
+          </button>
+          <button
             onClick={whatsappBroadcast}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-green-200"
           >
@@ -376,13 +439,15 @@ export default function SellerDashboard() {
             <div className="flex gap-2">
               <button
                 onClick={() => massSetStatus('in_transit')}
-                className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                disabled={massUpdating}
+                className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
               >
                 → {t('in_transit')}
               </button>
               <button
                 onClick={() => massSetStatus('delivered')}
-                className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                disabled={massUpdating}
+                className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
               >
                 → {t('delivered')}
               </button>
@@ -445,6 +510,11 @@ export default function SellerDashboard() {
         {/* Таблица */}
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
+        ) : orders.length === 0 ? (
+          <div className="text-center py-20 text-sm">
+            <p className="text-gray-500 mb-1">{t('notFound')}</p>
+            <p className="text-gray-400">{t('dashboardNoOrdersMsg')}</p>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('notFound')}</div>
         ) : (
@@ -495,7 +565,7 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STAGE_BADGE_CLASS[stage]}`}>
                         {STAGE_ICON[stage]}
-                        {STAGE_LABEL[stage]}
+                        {STAGE_LABEL_LOCAL[stage]}
                       </span>
                       {order.accepted_at ? (
                         <span
@@ -592,7 +662,15 @@ export default function SellerDashboard() {
         </div>
       )}
 
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          actionLabel={toast.actionLabel}
+          actionHref={toast.actionHref}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   )
 }

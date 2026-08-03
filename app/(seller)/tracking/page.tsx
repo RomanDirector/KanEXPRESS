@@ -87,12 +87,23 @@ export default function TrackingPage() {
       </header>
 
       <main className="px-8 py-6 max-w-7xl mx-auto">
+        {!loading && couriers.length === 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4 text-center shadow-sm">
+            <p className="text-sm text-gray-500 mb-3">{t('trackingNoCouriersMsg')}</p>
+            <Link
+              href="/staff"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
+            >
+              {t('staff')}
+            </Link>
+          </div>
+        )}
+
         {tab === 'map' && <CourierTrackingMap />}
 
         {tab === 'list' && (
           <div className="space-y-4">
             {loading && <p className="text-gray-400">{t('loading')}</p>}
-            {!loading && couriers.length === 0 && <p className="text-gray-400">{t('noCouriers')}</p>}
             {couriers.map((c) => (
               <div key={c.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">

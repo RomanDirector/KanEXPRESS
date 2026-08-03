@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Search, Calendar, Ban } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { Toast } from '@/components/Toast'
 
 interface CancelledOrder {
   id: string
@@ -14,17 +15,18 @@ interface CancelledOrder {
   cancelled_at: string | null
 }
 
-const CANCELLED_BY_LABEL: Record<string, string> = {
-  courier: 'Курьер',
-  seller: 'Продавец',
-}
-
 export default function CancelledOrdersPage() {
   const { t } = useLang()
   const [orders, setOrders] = useState<CancelledOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterDate, setFilterDate] = useState('')
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+
+  const CANCELLED_BY_LABEL: Record<string, string> = {
+    courier: t('cancelledByCourier'),
+    seller: t('cancelledBySeller'),
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -38,8 +40,10 @@ export default function CancelledOrdersPage() {
         .eq('seller_id', sellerId)
         .eq('courier_stage', 'cancelled')
         .order('cancelled_at', { ascending: false })
-      if (error) console.error(error.message)
-      else setOrders(data as CancelledOrder[])
+      if (error) {
+        console.error(error.message)
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
+      } else setOrders(data as CancelledOrder[])
       setLoading(false)
     }
 
@@ -78,7 +82,7 @@ export default function CancelledOrdersPage() {
       <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('cancelled')}</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Отменённые заказы вашего магазина</p>
+          <p className="text-sm text-gray-400 mt-0.5">{t('cancelledPageSub')}</p>
         </div>
       </header>
 
@@ -127,9 +131,9 @@ export default function CancelledOrdersPage() {
                 <tr className="border-b border-gray-100 bg-gray-50">
                   <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('orderNum')}</th>
                   <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('address')}</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Причина отмены</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Кем отменён</th>
-                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Дата отмены</th>
+                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('cancelReasonHeader')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('cancelledByHeader')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('cancelledAtHeader')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -154,6 +158,8 @@ export default function CancelledOrdersPage() {
         )}
         <p className="text-xs text-gray-400 mt-3 font-medium">{t('total')}: {filtered.length}</p>
       </main>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

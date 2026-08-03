@@ -36,12 +36,18 @@ export async function loadZones(): Promise<Zone[]> {
 }
 
 export async function assignZonesToOrders(): Promise<{ assigned: number; unassigned: number }> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { assigned: 0, unassigned: 0 }
+
   const zones = await loadZones()
   if (zones.length === 0) return { assigned: 0, unassigned: 0 }
 
   const { data: courierZoneRows, error: czError } = await supabase
     .from('courier_zones')
-    .select('zone_id, couriers(full_name)')
+    .select('zone_id, couriers(full_name), zones!inner(seller_id)')
+    .eq('zones.seller_id', user.id)
   if (czError) { console.error('Ошибка загрузки courier_zones:', czError); return { assigned: 0, unassigned: 0 } }
 
   const zoneToCouriers: Record<string, string[]> = {}
@@ -54,6 +60,7 @@ export async function assignZonesToOrders(): Promise<{ assigned: number; unassig
 
   const { data: orders, error } = await supabase
     .from('orders').select('id, lat, lng')
+    .eq('seller_id', user.id)
     .is('courier_name', null).eq('status', 'pending')
     .not('lat', 'is', null).not('lng', 'is', null)
   if (error || !orders) { console.error('Ошибка загрузки заказов:', error); return { assigned: 0, unassigned: 0 } }
@@ -73,12 +80,14 @@ export async function assignZonesToOrders(): Promise<{ assigned: number; unassig
       const { error: updError } = await supabase.from('orders')
         .update({ courier_name: couriers[idx], courier_stage: 'not_started', zone_id: zone.id })
         .eq('id', order.id)
+        .eq('seller_id', user.id)
       if (updError) console.error('Ошибка обновления заказа', order.id, updError)
       else assigned++
     } else {
       const { error: updError } = await supabase.from('orders')
         .update({ zone_id: zone.id })
         .eq('id', order.id)
+        .eq('seller_id', user.id)
       if (updError) console.error('Ошибка обновления заказа (только zone_id)', order.id, updError)
       unassigned++
     }

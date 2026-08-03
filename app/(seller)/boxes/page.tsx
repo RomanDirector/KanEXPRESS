@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
@@ -38,10 +38,21 @@ export default function BoxesPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [savingBox, setSavingBox] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAll();
   }, []);
+
+  useEffect(() => {
+    if (!qrBox) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setQrBox(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [qrBox]);
 
   async function loadAll() {
     setLoading(true);
@@ -73,7 +84,8 @@ export default function BoxesPage() {
   }
 
   async function addBox() {
-    if (!newLabel.trim() || !newZoneId) return;
+    if (!newLabel.trim() || !newZoneId || savingBox) return;
+    setSavingBox(true);
     const { data: userData } = await supabase.auth.getUser();
     const { error } = await supabase.from('delivery_boxes').insert({
       seller_id: userData?.user?.id,
@@ -82,28 +94,33 @@ export default function BoxesPage() {
       label: newLabel.trim(),
     });
     if (error) {
-      alert(t('errorPrefix') + error.message);
+      setToast({ message: t('errorPrefix') + error.message, type: 'error' });
+      setSavingBox(false);
       return;
     }
     setNewLabel('');
     setNewZoneId('');
     setShowAddForm(false);
+    setSavingBox(false);
     setToast({ message: t('boxAddedMsg'), type: 'success' });
     loadAll();
   }
 
   async function deleteBox(box: Box) {
+    if (deletingId) return;
     if (!confirm(t('deleteBoxConfirm').replace('{name}', box.label))) return;
+    setDeletingId(box.id);
     const { error } = await supabase
       .from('delivery_boxes')
       .delete()
       .eq('id', box.id)
       .eq('seller_id', sellerId ?? '');
     if (error) {
-      alert(t('errorPrefix') + error.message);
+      setToast({ message: t('errorPrefix') + error.message, type: 'error' });
     } else {
       setToast({ message: t('boxDeletedMsg'), type: 'success' });
     }
+    setDeletingId(null);
     loadAll();
   }
 
@@ -151,7 +168,13 @@ export default function BoxesPage() {
       </div>
 
       {showAddForm && (
-        <div className="bg-white rounded-xl border p-4 mb-4 flex flex-wrap items-end gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            addBox();
+          }}
+          className="bg-white rounded-xl border p-4 mb-4 flex flex-wrap items-end gap-3"
+        >
           <label className="text-sm">
             <span className="block text-xs text-gray-500">{t('boxLabelLabel')}</span>
             <input
@@ -177,12 +200,13 @@ export default function BoxesPage() {
             </select>
           </label>
           <button
-            onClick={addBox}
-            className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold"
+            type="submit"
+            disabled={savingBox}
+            className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold disabled:opacity-50"
           >
-            {t('save')}
+            {savingBox ? t('saving') : t('save')}
           </button>
-        </div>
+        </form>
       )}
 
       <div className="bg-white rounded-xl border overflow-x-auto">
@@ -206,7 +230,8 @@ export default function BoxesPage() {
             {!loading && boxes.length === 0 && (
               <tr>
                 <td colSpan={4} className="p-6 text-center text-gray-500">
-                  {t('noBoxes')}
+                  <p>{t('noBoxes')}</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('boxesEmptyHintMsg')}</p>
                 </td>
               </tr>
             )}
@@ -224,9 +249,10 @@ export default function BoxesPage() {
                   </button>
                   <button
                     onClick={() => deleteBox(b)}
-                    className="px-3 py-1 rounded border text-xs text-red-600"
+                    disabled={deletingId === b.id}
+                    className="px-3 py-1 rounded border text-xs text-red-600 disabled:opacity-50"
                   >
-                    {t('delete')}
+                    {deletingId === b.id ? t('loading') : t('delete')}
                   </button>
                 </td>
               </tr>
@@ -241,9 +267,16 @@ export default function BoxesPage() {
           onClick={() => setQrBox(null)}
         >
           <div
-            className="bg-white rounded-xl p-6 w-[360px] shadow-2xl flex flex-col items-center"
+            className="relative bg-white rounded-xl p-6 w-[360px] shadow-2xl flex flex-col items-center"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              onClick={() => setQrBox(null)}
+              aria-label={t('close')}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700"
+            >
+              <X size={20} />
+            </button>
             <h3 className="font-bold mb-3">{qrModalTitle}</h3>
             {qrDataUrl ? (
               <img src={qrDataUrl} alt={qrBox.code} className="w-64 h-64 mb-3" />

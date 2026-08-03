@@ -3,13 +3,12 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { LogOut, Crown, Pencil, ArrowLeft, Camera, Image as ImageIcon, Trash2 } from 'lucide-react'
+import { LogOut, Crown, Pencil, ArrowLeft, Camera, Image as ImageIcon, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { computeSubscriptionStatus } from '@/lib/limits'
 import { useLang, localeTag } from '@/lib/i18n'
 import { Toast } from '@/components/Toast'
 
-// TODO: требуется alter table sellers add column avatar_url text
 interface SellerData {
   full_name: string
   phone: string
@@ -92,16 +91,61 @@ export default function ProfilePage() {
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [upgrading, setUpgrading] = useState(false)
-  const [upgradeSuccess, setUpgradeSuccess] = useState(false)
+  const [paymentRequestSent, setPaymentRequestSent] = useState(false)
+  const [paymentContact, setPaymentContact] = useState('')
 
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarBroken, setAvatarBroken] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
 
+  const [kaspiShopId, setKaspiShopId] = useState('')
+  const [kaspiTokenConfigured, setKaspiTokenConfigured] = useState(false)
+  const [kaspiTokenInput, setKaspiTokenInput] = useState('')
+  const [kaspiLoading, setKaspiLoading] = useState(true)
+  const [kaspiSaving, setKaspiSaving] = useState(false)
+
   useEffect(() => {
     load()
+    loadKaspiCredentials()
   }, [])
+
+  async function loadKaspiCredentials() {
+    setKaspiLoading(true)
+    try {
+      const res = await fetch('/api/seller/kaspi-credentials')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || t('serverErrorGeneric'))
+      setKaspiShopId(json.shopId || '')
+      setKaspiTokenConfigured(!!json.tokenConfigured)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('serverErrorGeneric')
+      setToast({ message: t('kaspiCredentialsLoadErrorPrefix') + message, type: 'error' })
+    }
+    setKaspiLoading(false)
+  }
+
+  async function saveKaspiCredentials() {
+    setKaspiSaving(true)
+    try {
+      const res = await fetch('/api/seller/kaspi-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopId: kaspiShopId, token: kaspiTokenInput }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || t('serverErrorGeneric'))
+      if (kaspiTokenInput.trim() !== '') {
+        setKaspiTokenConfigured(true)
+        setKaspiTokenInput('')
+      }
+      setToast({ message: t('kaspiCredentialsSavedMsg'), type: 'success' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('serverErrorGeneric')
+      setToast({ message: t('kaspiCredentialsSaveErrorPrefix') + message, type: 'error' })
+    }
+    setKaspiSaving(false)
+  }
 
   async function load() {
     setLoading(true)
@@ -181,6 +225,11 @@ export default function ProfilePage() {
 
   async function saveProfile() {
     if (!userId) return
+    const phone = editForm.phone.trim()
+    if (phone && !/^\+7\d{10}$/.test(phone)) {
+      setToast({ message: t('invalidPhoneFormatMsg'), type: 'error' })
+      return
+    }
     setSavingProfile(true)
     const { error } = await supabase.from('sellers').update(editForm).eq('id', userId)
     setSavingProfile(false)
@@ -369,39 +418,38 @@ export default function ProfilePage() {
 
   async function handleUpgradeConfirm() {
     if (!userId) return
-    setUpgrading(true)
-    // TODO: заменить на реальную интеграцию Kaspi Pay API когда будет готова
-    const { error } = await supabase.rpc('upgrade_to_pro', { p_seller_id: userId, p_amount: 10000 })
-    setUpgrading(false)
-    if (error) {
-      console.error(error)
-      alert(t('paymentErrorPrefix') + error.message)
+    const contact = paymentContact.trim()
+    if (!contact) {
+      alert(t('paymentContactRequiredMsg'))
       return
     }
+    setUpgrading(true)
+    // Активация подписки НЕ происходит здесь — это только заявка на ручную
+    // проверку перевода на Kaspi. Активирует администратор вручную через SQL
+    // после того, как убедится, что деньги действительно поступили.
+    let payment: PaymentRow | null = null
+    try {
+      const res = await fetch('/api/seller/subscription-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || t('serverErrorGeneric'))
+      payment = json.payment as PaymentRow
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('serverErrorGeneric')
+      alert(t('paymentErrorPrefix') + message)
+      setUpgrading(false)
+      return
+    }
+    setUpgrading(false)
 
-    const [{ data: subData }, { data: paymentsData }] = await Promise.all([
-      supabase
-        .from('seller_subscriptions')
-        .select('plan, expires_at, cancel_at_period_end, trial_ends_at')
-        .eq('seller_id', userId)
-        .maybeSingle(),
-      supabase
-        .from('payment_history')
-        .select('id, amount, plan, status, created_at')
-        .eq('seller_id', userId)
-        .order('created_at', { ascending: false }),
-    ])
-
-    setSubscription({
-      plan: subData?.plan === 'pro' ? 'pro' : 'free',
-      expires_at: subData?.expires_at ?? null,
-      cancel_at_period_end: subData?.cancel_at_period_end ?? false,
-      trial_ends_at: subData?.trial_ends_at ?? null,
-    })
-    setPayments((paymentsData || []) as PaymentRow[])
+    if (payment) setPayments((prev) => [payment as PaymentRow, ...prev])
     setShowUpgradeModal(false)
-    setUpgradeSuccess(true)
-    setTimeout(() => setUpgradeSuccess(false), 4000)
+    setPaymentContact('')
+    setPaymentRequestSent(true)
+    setTimeout(() => setPaymentRequestSent(false), 8000)
   }
 
   function confirmDeleteAccount() {
@@ -424,50 +472,6 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-3xl mx-auto px-8 pt-6">
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('brandingTitle')}</h2>
-          <div className="flex items-center gap-4">
-            <div className="w-24 h-24 shrink-0 rounded-xl border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50">
-              {seller?.company_logo_url ? (
-                <img
-                  src={seller.company_logo_url}
-                  alt={t('companyLogoAlt')}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="flex flex-col items-center gap-1 text-gray-300">
-                  <ImageIcon size={24} />
-                  <span className="text-[10px] text-gray-400 text-center px-1">{t('logoNotUploadedLabel')}</span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <label className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all cursor-pointer">
-                {uploadingLogo ? t('uploadingLabel') : t('uploadLogoBtn')}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={uploadLogo}
-                  className="hidden"
-                  disabled={uploadingLogo}
-                />
-              </label>
-              {seller?.company_logo_url && (
-                <button
-                  onClick={deleteLogo}
-                  disabled={uploadingLogo}
-                  className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition-all inline-flex items-center gap-1.5"
-                >
-                  <Trash2 size={14} />
-                  {t('deleteLogoBtn')}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
       <header className="bg-white border-b border-gray-100 px-8 py-5">
         <Link
           href="/dashboard"
@@ -585,6 +589,50 @@ export default function ProfilePage() {
           )}
         </div>
 
+        {/* Брендинг */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('brandingTitle')}</h2>
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-28 h-28 shrink-0 rounded-xl border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50 shadow-inner">
+              {seller?.company_logo_url ? (
+                <img
+                  src={seller.company_logo_url}
+                  alt={t('companyLogoAlt')}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-1 text-gray-300">
+                  <ImageIcon size={28} />
+                  <span className="text-[10px] text-gray-400 text-center px-1">{t('logoNotUploadedLabel')}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all cursor-pointer inline-flex items-center gap-1.5">
+                <Upload size={14} />
+                {uploadingLogo ? t('uploadingLabel') : t('uploadLogoBtn')}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={uploadLogo}
+                  className="hidden"
+                  disabled={uploadingLogo}
+                />
+              </label>
+              {seller?.company_logo_url && (
+                <button
+                  onClick={deleteLogo}
+                  disabled={uploadingLogo}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition-all inline-flex items-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  {t('deleteLogoBtn')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Подписка */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
           <h2 className="text-sm font-bold text-gray-900 mb-4">{t('subscriptionTitle')}</h2>
@@ -630,14 +678,22 @@ export default function ProfilePage() {
             <p className="text-sm font-semibold text-gray-900 mt-3">{t('pricePerMonthLabel')}</p>
           </div>
 
-          {upgradeSuccess && (
+          {paymentRequestSent && (
             <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 mb-4">
-              {t('subActivatedMsg')}
+              {t('paymentRequestSentMsg')}
             </div>
           )}
 
-          {subState.status === 'expired' && (
-            <div>
+          {subState.status === 'trial' && subState.daysLeft <= 3 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 mb-4">
+              {t('trialEndingSoonMsg')
+                .replace('{days}', String(subState.daysLeft))
+                .replace('{unit}', t(subState.daysLeft === 1 ? 'dayWordOne' : 'dayWordMany'))}
+            </div>
+          )}
+
+          {(subState.status === 'expired' || subState.status === 'trial') && (
+            <div className="mb-4">
               <button
                 onClick={() => setShowUpgradeModal(true)}
                 className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
@@ -705,6 +761,48 @@ export default function ProfilePage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        {/* Kaspi */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+          <h2 className="text-sm font-bold text-gray-900 mb-4">{t('kaspiIntegrationTitle')}</h2>
+          {kaspiLoading ? (
+            <p className="text-gray-400 text-sm">{t('loading')}</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">{t('kaspiShopIdLabel')}</p>
+                  <input
+                    value={kaspiShopId}
+                    onChange={(e) => setKaspiShopId(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">{t('kaspiTokenLabel')}</p>
+                  <input
+                    type="password"
+                    value={kaspiTokenInput}
+                    onChange={(e) => setKaspiTokenInput(e.target.value)}
+                    placeholder={t('kaspiTokenPlaceholder')}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                  <p className={`text-xs mt-1 ${kaspiTokenConfigured ? 'text-green-600' : 'text-gray-400'}`}>
+                    {kaspiTokenConfigured ? `✓ ${t('kaspiTokenConfiguredLabel')}` : t('kaspiTokenNotConfiguredLabel')}
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">{t('kaspiTokenHint')}</p>
+              <button
+                onClick={saveKaspiCredentials}
+                disabled={kaspiSaving}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
+              >
+                {kaspiSaving ? t('saving') : t('save')}
+              </button>
             </div>
           )}
         </div>
@@ -836,7 +934,9 @@ export default function ProfilePage() {
       {showUpgradeModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setShowUpgradeModal(false)}
+          onClick={() => {
+            if (!upgrading) setShowUpgradeModal(false)
+          }}
         >
           <div
             className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
@@ -846,6 +946,15 @@ export default function ProfilePage() {
             <p className="text-sm text-gray-600 mb-4">
               {t('upgradeModalText')}
             </p>
+            <div className="mb-4">
+              <p className="text-xs text-gray-400 mb-1">{t('paymentContactLabel')}</p>
+              <input
+                value={paymentContact}
+                onChange={(e) => setPaymentContact(e.target.value)}
+                placeholder={t('paymentContactPlaceholder')}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              />
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={handleUpgradeConfirm}

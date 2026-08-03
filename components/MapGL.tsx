@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { buildWarehouseIcon } from '@/lib/map-icons'
@@ -48,6 +48,19 @@ export interface MapGLProps {
   // id точки, которую нужно подсветить (например, выбранная в списке слева карточка)
   selectedId?: string | null
   onPointClick?: (point: MapPoint) => void
+  // клик по пустому месту карты (не по маркеру) — используется, чтобы снять выделение
+  onBackgroundClick?: () => void
+}
+
+// Отдельный компонент, а не onClick на обёртке: клики по маркерам должны
+// снимать выделение только через onPointClick, а не через фон карты —
+// поэтому у маркеров ниже выставлен bubblingMouseEvents:false и клик по
+// маркеру сюда не долетает.
+function BackgroundClickHandler({ onBackgroundClick }: { onBackgroundClick?: () => void }) {
+  useMapEvents({
+    click: () => onBackgroundClick?.(),
+  })
+  return null
 }
 
 const DEFAULT_STATUS_COLORS: Record<string, string> = {
@@ -121,6 +134,7 @@ export function MapGL({
   statusColors,
   selectedId,
   onPointClick,
+  onBackgroundClick,
 }: MapGLProps) {
   const colors = statusColors ?? DEFAULT_STATUS_COLORS
   const validPoints = useMemo(() => points.filter(isValidAlmatyPoint), [points])
@@ -138,6 +152,8 @@ export function MapGL({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; OpenStreetMap contributors'
         />
+
+        <BackgroundClickHandler onBackgroundClick={onBackgroundClick} />
 
         {zones?.map((zone) => {
           const positions = zone.coordinates.coordinates[0].map(
@@ -163,6 +179,7 @@ export function MapGL({
               key={point.id}
               position={[point.lat, point.lng]}
               icon={icon}
+              bubblingMouseEvents={false}
               eventHandlers={{
                 click: () => onPointClick?.(point),
               }}

@@ -139,6 +139,17 @@ export default function CourierMapPage() {
     }
   }, [supabase, courier.id, courier.full_name])
 
+  // Escape снимает выделение заказа — без этого выбранная карточка/маркер
+  // остаются подсвеченными навсегда, пока курьер не выберет другой заказ.
+  useEffect(() => {
+    if (!selectedId) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedId])
+
   const filteredOrders = filter === 'all' ? orders : orders.filter((o) => getDisplayStage(o) === filter)
 
   const points: MapPoint[] = filteredOrders.map((o) => ({
@@ -159,7 +170,7 @@ export default function CourierMapPage() {
       </header>
 
       <main className="px-6 py-6 max-w-7xl mx-auto space-y-4">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant={filter === 'all' ? 'default' : 'outline'}
@@ -182,6 +193,11 @@ export default function CourierMapPage() {
               </Button>
             )
           })}
+          {selectedId && (
+            <Button size="sm" variant="outline" className="ml-auto" onClick={() => setSelectedId(null)}>
+              Сбросить выделение
+            </Button>
+          )}
         </div>
 
         {loading ? (
@@ -267,6 +283,7 @@ export default function CourierMapPage() {
                   statusColors={STAGE_MARKER_COLOR}
                   selectedId={selectedId}
                   onPointClick={(point) => setSelectedId(point.id)}
+                  onBackgroundClick={() => setSelectedId(null)}
                 />
 
                 <Card className="absolute bottom-4 left-4 rounded-2xl p-3 space-y-1.5 shadow-sm">
