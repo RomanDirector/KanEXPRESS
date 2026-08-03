@@ -8,6 +8,7 @@ import 'leaflet-draw';
 import { supabase } from '@/lib/supabase';
 import { useLang } from '@/lib/i18n';
 import { Toast } from '@/components/Toast';
+import { buildWarehouseIcon } from '@/lib/map-icons';
 
 const ALMATY_CENTER: [number, number] = [43.238949, 76.889709];
 const DEFAULT_ZOOM = 11;
@@ -116,6 +117,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   const containerRef = useRef<HTMLDivElement | null>(null);
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const orderLayerRef = useRef<L.LayerGroup | null>(null);
+  const warehouseMarkerRef = useRef<L.Marker | null>(null);
   const drawControlRef = useRef<any>(null);
   const polygonHandlerRef = useRef<any>(null);
   const sellerIdRef = useRef<string | null>(null);
@@ -195,6 +197,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     (async () => {
       await getSellerId();
       await loadExistingZones();
+      await loadWarehouseMarker();
     })();
 
     map.on((L as any).Draw.Event.DRAWSTART, (e: any) => {
@@ -306,6 +309,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       // в dev монтирует эффект дважды) — без сброса следующий рендер добавлял бы
       // маркеры в уже уничтоженный, отвязанный от карты layerGroup.
       orderLayerRef.current = null;
+      warehouseMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -434,6 +438,44 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     });
 
     setZonesCount(() => zones.length);
+  }
+
+  // Метка склада продавца — постоянная, не зависит от зон/заказов и никогда
+  // не скрывается фильтрами (их на этой карте и нет, но на всякий случай
+  // держим отдельно от orderLayerRef, который очищается при каждом ре-рендере orders).
+  async function loadWarehouseMarker() {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const sellerId = await getSellerId();
+    if (!sellerId) return;
+
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('warehouse_address, warehouse_lat, warehouse_lng')
+      .eq('id', sellerId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Ошибка загрузки адреса склада:', error);
+      return;
+    }
+    if (data?.warehouse_lat == null || data?.warehouse_lng == null) return;
+
+    if (warehouseMarkerRef.current) {
+      map.removeLayer(warehouseMarkerRef.current);
+      warehouseMarkerRef.current = null;
+    }
+
+    const marker = L.marker([data.warehouse_lat, data.warehouse_lng], {
+      icon: buildWarehouseIcon(),
+      zIndexOffset: 1000,
+    });
+    marker.bindPopup(
+      `<div style="min-width:160px"><b>${escapeHtml(t('warehouseLabel'))}</b><br/>${escapeHtml(data.warehouse_address || '')}</div>`
+    );
+    marker.addTo(map);
+    warehouseMarkerRef.current = marker;
   }
 
   function finishPolygon() {

@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { buildWarehouseIcon } from '@/lib/map-icons'
 
 export interface MapPoint {
   id: string
@@ -23,9 +24,20 @@ export interface MapZone {
   coordinates: { type: string; coordinates: number[][][] }
 }
 
+export interface WarehousePoint {
+  id: string
+  lat: number
+  lng: number
+  address: string | null
+  name: string | null
+}
+
 export interface MapGLProps {
   points: MapPoint[]
   zones?: MapZone[]
+  // Постоянные метки складов продавцов — не участвуют ни в фильтрации по
+  // стадиям, ни в подсветке выбора, показываются всегда поверх остальных точек.
+  warehouses?: WarehousePoint[]
   center?: [number, number]
   zoom?: number
   height?: string
@@ -57,7 +69,7 @@ const DEFAULT_STATUS_COLORS: Record<string, string> = {
   in_transit: '#3B82F6',
   delivered: '#10B981',
   // стадии курьера — используются, если вызывающая страница не передала
-  // свой statusColors (обычно передаёт, см. STAGE_MARKER_COLORS на /courier-map)
+  // свой statusColors (обычно передаёт, см. STAGE_MARKER_COLOR в lib/order-status.ts)
   not_started: '#9CA3AF',
   departed: '#3B82F6',
   arrived: '#F59E0B',
@@ -115,6 +127,7 @@ function buildMarkerIcon(color: string, selected: boolean) {
 export function MapGL({
   points,
   zones,
+  warehouses,
   center = [43.238949, 76.889709],
   zoom = 12,
   height = '500px',
@@ -125,6 +138,7 @@ export function MapGL({
 }: MapGLProps) {
   const colors = statusColors ?? DEFAULT_STATUS_COLORS
   const validPoints = useMemo(() => points.filter(isValidAlmatyPoint), [points])
+  const warehouseIcon = useMemo(() => buildWarehouseIcon(), [])
 
   return (
     <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
@@ -176,6 +190,35 @@ export function MapGL({
                   <p>{point.client_address}</p>
                   <p>{point.client_phone}</p>
                   <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+
+        {warehouses?.map((warehouse) => {
+          const route = warehouse.lat && warehouse.lng
+            ? `dgis://2gis.ru/routeSearch/rsType/car/to/${warehouse.lng},${warehouse.lat}`
+            : warehouse.address
+            ? `https://2gis.kz/almaty/search/${encodeURIComponent(warehouse.address)}`
+            : null
+
+          return (
+            <Marker key={warehouse.id} position={[warehouse.lat, warehouse.lng]} icon={warehouseIcon} zIndexOffset={1000}>
+              <Popup>
+                <div className="text-sm space-y-1.5">
+                  <p className="font-bold">{warehouse.name || 'Склад'}</p>
+                  {warehouse.address && <p>{warehouse.address}</p>}
+                  {route && (
+                    <a
+                      href={route}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 font-semibold underline"
+                    >
+                      Маршрут в 2ГИС →
+                    </a>
+                  )}
                 </div>
               </Popup>
             </Marker>

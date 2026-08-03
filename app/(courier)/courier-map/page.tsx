@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase'
 import { useCourier } from '@/lib/courier-context'
-import type { MapPoint, MapZone } from '@/components/MapGL'
+import type { MapPoint, MapZone, WarehousePoint } from '@/components/MapGL'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Package, Truck, CheckCircle, RotateCcw, MapPin, Phone, Navigation } from 'lucide-react'
+import { Package, Truck, CheckCircle, RotateCcw, MapPin, Phone, Navigation, Ban } from 'lucide-react'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -28,22 +29,16 @@ interface Order {
   lng: number | null
 }
 
-const STAGES: CourierStage[] = ['not_started', 'departed', 'arrived', 'delivered', 'returned']
+const STAGES: DisplayStage[] = ['not_started', 'dropped', 'departed', 'arrived', 'delivered', 'returned']
 
-const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; className: string }> = {
-  not_started: { label: 'Не начато', icon: Package, className: 'border-gray-200 bg-gray-50 text-gray-600' },
-  departed:    { label: 'Выехал',    icon: Truck,    className: 'border-blue-200 bg-blue-50 text-blue-700' },
-  arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
-  returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
-}
-
-const STAGE_MARKER_COLORS: Record<CourierStage, string> = {
-  not_started: '#9ca3af',
-  departed: '#3b82f6',
-  arrived: '#f59e0b',
-  delivered: '#22c55e',
-  returned: '#ef4444',
+const STAGE_ICON: Record<DisplayStage, typeof Package> = {
+  not_started: Package,
+  dropped: Package,
+  departed: Truck,
+  arrived: MapPin,
+  delivered: CheckCircle,
+  returned: RotateCcw,
+  cancelled: Ban,
 }
 
 // Маршрут по координатам точнее, но они есть не у всех заказов (например,
@@ -51,7 +46,7 @@ const STAGE_MARKER_COLORS: Record<CourierStage, string> = {
 // ссылку на поиск по текстовому адресу, а не молчим и не ведём в никуда.
 function routeUrl(order: Order): string | null {
   if (order.lat && order.lng) {
-    return `https://2gis.kz/routeSearch/rsType/car/to/${order.lng},${order.lat}`
+    return `dgis://2gis.ru/routeSearch/rsType/car/to/${order.lng},${order.lat}`
   }
   if (order.client_address) {
     return `https://2gis.kz/almaty/search/${encodeURIComponent(order.client_address)}`
@@ -64,8 +59,9 @@ export default function CourierMapPage() {
   const courier = useCourier()
   const [orders, setOrders] = useState<Order[]>([])
   const [zones, setZones] = useState<MapZone[]>([])
+  const [warehouses, setWarehouses] = useState<WarehousePoint[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<CourierStage | 'all'>('all')
+  const [filter, setFilter] = useState<DisplayStage | 'all'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -85,15 +81,53 @@ export default function CourierMapPage() {
 
     fetchOrders()
 
-    const fetchZones = async () => {
-      const { data: zoneLinks } = await supabase
+    // Зоны курьера привязаны к продавцам (zones.seller_id) — те же продавцы
+    // владеют складами, чьи метки должны быть видны на карте курьера всегда,
+    // независимо от фильтра по стадиям заказов.
+    const fetchZonesAndWarehouses = async () => {
+      const { data: zoneLinks, error } = await supabase
         .from('courier_zones')
-        .select('zones(id, name, color, coordinates)')
+        .select('zones(id, name, color, coordinates, seller_id)')
         .eq('courier_id', courier.id)
-      setZones((zoneLinks || []).map((row: any) => row.zones).filter(Boolean))
+      if (error) {
+        console.error(error.message)
+        return
+      }
+
+      const linkedZones = (zoneLinks || []).map((row: any) => row.zones).filter(Boolean)
+      setZones(linkedZones.map(({ seller_id, ...zone }: any) => zone))
+
+      const sellerIds = Array.from(
+        new Set(linkedZones.map((z: any) => z.seller_id).filter((id: string | null): id is string => !!id)),
+      )
+      if (sellerIds.length === 0) {
+        setWarehouses([])
+        return
+      }
+
+      const { data: sellersData, error: sellersError } = await supabase
+        .from('sellers')
+        .select('id, organization_name, warehouse_address, warehouse_lat, warehouse_lng')
+        .in('id', sellerIds)
+      if (sellersError) {
+        console.error(sellersError.message)
+        return
+      }
+
+      setWarehouses(
+        (sellersData || [])
+          .filter((s: any) => s.warehouse_lat != null && s.warehouse_lng != null)
+          .map((s: any) => ({
+            id: s.id,
+            lat: s.warehouse_lat,
+            lng: s.warehouse_lng,
+            address: s.warehouse_address,
+            name: s.organization_name,
+          })),
+      )
     }
 
-    fetchZones()
+    fetchZonesAndWarehouses()
 
     const channel = supabase
       .channel('courier-map-orders-realtime')
@@ -116,7 +150,7 @@ export default function CourierMapPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedId])
 
-  const filteredOrders = filter === 'all' ? orders : orders.filter((o) => o.courier_stage === filter)
+  const filteredOrders = filter === 'all' ? orders : orders.filter((o) => getDisplayStage(o) === filter)
 
   const points: MapPoint[] = filteredOrders.map((o) => ({
     id: o.id,
@@ -125,7 +159,7 @@ export default function CourierMapPage() {
     order_number: o.order_number,
     client_address: o.client_address,
     client_phone: o.client_phone,
-    status: o.courier_stage,
+    status: getDisplayStage(o),
     price: o.courier_fee,
   }))
 
@@ -145,9 +179,8 @@ export default function CourierMapPage() {
             Все ({orders.length})
           </Button>
           {STAGES.map((stage) => {
-            const cfg = STAGE_CONFIG[stage]
-            const Icon = cfg.icon
-            const count = orders.filter((o) => o.courier_stage === stage).length
+            const Icon = STAGE_ICON[stage]
+            const count = orders.filter((o) => getDisplayStage(o) === stage).length
             return (
               <Button
                 key={stage}
@@ -156,7 +189,7 @@ export default function CourierMapPage() {
                 onClick={() => setFilter(stage)}
               >
                 <Icon className="mr-1.5 h-4 w-4" />
-                {cfg.label} ({count})
+                {STAGE_LABEL[stage]} ({count})
               </Button>
             )
           })}
@@ -176,8 +209,8 @@ export default function CourierMapPage() {
                 <div className="text-center py-16 text-muted-foreground">Заказов нет</div>
               ) : (
                 filteredOrders.map((order) => {
-                  const stage = STAGE_CONFIG[order.courier_stage]
-                  const StageIcon = stage.icon
+                  const stage = getDisplayStage(order)
+                  const StageIcon = STAGE_ICON[stage]
                   const isSelected = order.id === selectedId
                   const route = routeUrl(order)
 
@@ -201,9 +234,9 @@ export default function CourierMapPage() {
                             {order.client_address}
                           </div>
                         </div>
-                        <Badge variant="outline" className={`gap-1 shrink-0 ${stage.className}`}>
+                        <Badge variant="outline" className={`gap-1 shrink-0 ${STAGE_BADGE_CLASS[stage]}`}>
                           <StageIcon className="h-3 w-3" />
-                          {stage.label}
+                          {STAGE_LABEL[stage]}
                         </Badge>
                       </div>
 
@@ -245,8 +278,9 @@ export default function CourierMapPage() {
                 <MapGL
                   points={points}
                   zones={zones}
+                  warehouses={warehouses}
                   height="600px"
-                  statusColors={STAGE_MARKER_COLORS}
+                  statusColors={STAGE_MARKER_COLOR}
                   selectedId={selectedId}
                   onPointClick={(point) => setSelectedId(point.id)}
                   onBackgroundClick={() => setSelectedId(null)}
@@ -257,9 +291,9 @@ export default function CourierMapPage() {
                     <div key={stage} className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span
                         className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: STAGE_MARKER_COLORS[stage] }}
+                        style={{ backgroundColor: STAGE_MARKER_COLOR[stage] }}
                       />
-                      {STAGE_CONFIG[stage].label}
+                      {STAGE_LABEL[stage]}
                     </div>
                   ))}
                 </Card>

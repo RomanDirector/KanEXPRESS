@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { Package, Truck, CheckCircle, Search, Calendar, Download, Share2, Shuffle, RefreshCw } from 'lucide-react'
+import { Package, Truck, CheckCircle, MapPin, RotateCcw, Ban, Search, Calendar, Download, Share2, Shuffle, RefreshCw } from 'lucide-react'
 import { useLang, localeTag } from '@/lib/i18n'
 import { waTemplates, openWhatsApp, defaultDeliveryWindow } from '@/lib/whatsapp-templates'
 import { getSellerCourierIds } from '@/lib/couriers'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 import { Toast } from '@/components/Toast'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
@@ -32,23 +33,28 @@ interface Order {
   accepted_at: string | null
 }
 
-const STATUS_STYLE: Record<OrderStatus, { color: string; bg: string; icon: React.ReactNode }> = {
-  pending:    { color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200',  icon: <Package size={13} /> },
-  in_transit: { color: 'text-blue-700',  bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={13} /> },
-  delivered:  { color: 'text-green-700', bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={13} /> },
-}
-
-// Курьер мог принять заказ сканом (status = 'in_transit'), но ещё не нажать
-// "Выехал" на своём дашборде (courier_stage остаётся 'not_started') — в этом
-// окне заказ физически лежит у курьера, а не едет к клиенту.
-function statusLabelKey(order: Pick<Order, 'status' | 'courier_stage'>): OrderStatus | 'shipped' {
-  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return 'shipped'
-  return order.status
+const STAGE_ICON: Record<DisplayStage, React.ReactNode> = {
+  not_started: <Package size={13} />,
+  dropped: <Package size={13} />,
+  departed: <Truck size={13} />,
+  arrived: <MapPin size={13} />,
+  delivered: <CheckCircle size={13} />,
+  returned: <RotateCcw size={13} />,
+  cancelled: <Ban size={13} />,
 }
 
 export default function SellerDashboard() {
   const { t, lang } = useLang()
   const locale = localeTag(lang)
+  const STAGE_LABEL_LOCAL: Record<DisplayStage, string> = {
+    not_started: t('stageNotStarted'),
+    dropped: t('stageDropped'),
+    departed: t('stageDeparted'),
+    arrived: t('stageArrived'),
+    delivered: t('stageDelivered'),
+    returned: t('stageReturned'),
+    cancelled: t('stageCancelled'),
+  }
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'all'>('all')
@@ -536,7 +542,9 @@ export default function SellerDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((order) => (
+                {filtered.map((order) => {
+                  const stage = getDisplayStage(order)
+                  return (
                   <tr
                     key={order.id}
                     className={`hover:bg-gray-50 transition-colors ${selected.has(order.id) ? 'bg-red-50' : ''}`}
@@ -555,9 +563,9 @@ export default function SellerDashboard() {
                     <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString(locale)} ₸</td>
                     <td className="px-4 py-4 text-gray-600 text-xs">{order.courier_name || '—'}</td>
                     <td className="px-4 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_STYLE[order.status].bg} ${STATUS_STYLE[order.status].color}`}>
-                        {STATUS_STYLE[order.status].icon}
-                        {t(statusLabelKey(order))}
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${STAGE_BADGE_CLASS[stage]}`}>
+                        {STAGE_ICON[stage]}
+                        {STAGE_LABEL_LOCAL[stage]}
                       </span>
                       {order.accepted_at ? (
                         <span
@@ -599,7 +607,8 @@ export default function SellerDashboard() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
