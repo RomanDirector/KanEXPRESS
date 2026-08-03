@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { Phone, Trash2, Wallet, Users, Link2, X } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 import { useSeller } from '@/lib/seller-context'
+import { Toast } from '@/components/Toast'
 
 interface Courier {
   id: string
@@ -51,12 +53,9 @@ export default function StaffPage() {
   const [assignCourierId, setAssignCourierId] = useState('')
   const [assignZoneId, setAssignZoneId] = useState('')
   const [assigning, setAssigning] = useState(false)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-
-  const showToast = (message: string) => {
-    setToastMessage(message)
-    setTimeout(() => setToastMessage(null), 3500)
-  }
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [unassigningId, setUnassigningId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // Курьеры, привязанные к зонам текущего продавца — join через courier_zones/zones,
   // а не прямой select('*') из couriers (курьеры общие на всю систему).
@@ -67,6 +66,7 @@ export default function StaffPage() {
       .eq('zones.seller_id', seller.id)
     if (error) {
       console.error(error.message)
+      setToast({ message: 'Не удалось загрузить курьеров: ' + error.message, type: 'error' })
       return
     }
 
@@ -117,6 +117,15 @@ export default function StaffPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seller.id])
 
+  useEffect(() => {
+    if (!showAssignModal) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAssignModal(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showAssignModal])
+
   const openAssignModal = () => {
     setAssignCourierId('')
     setAssignZoneId('')
@@ -133,9 +142,9 @@ export default function StaffPage() {
     if (error) {
       const isDuplicate = error.code === '23505' || error.message.includes('courier_zones_courier_id_zone_id_key')
       if (isDuplicate) {
-        showToast('Этот курьер уже привязан к этой зоне')
+        setToast({ message: 'Этот курьер уже привязан к этой зоне', type: 'error' })
       } else {
-        alert('Ошибка привязки: ' + error.message)
+        setToast({ message: 'Ошибка привязки: ' + error.message, type: 'error' })
       }
       return
     }
@@ -144,9 +153,11 @@ export default function StaffPage() {
   }
 
   const unassignZone = async (linkId: string) => {
+    setUnassigningId(linkId)
     const { error } = await supabase.from('courier_zones').delete().eq('id', linkId)
+    setUnassigningId(null)
     if (error) {
-      alert('Ошибка удаления привязки: ' + error.message)
+      setToast({ message: 'Ошибка удаления привязки: ' + error.message, type: 'error' })
       return
     }
     fetchCouriers()
@@ -154,7 +165,13 @@ export default function StaffPage() {
 
   const deleteCourier = async (id: string) => {
     if (!confirm('Удалить курьера?')) return
-    await supabase.from('couriers').delete().eq('id', id)
+    setDeletingId(id)
+    const { error } = await supabase.from('couriers').delete().eq('id', id)
+    setDeletingId(null)
+    if (error) {
+      setToast({ message: 'Ошибка удаления курьера: ' + error.message, type: 'error' })
+      return
+    }
     fetchCouriers()
   }
 
@@ -196,6 +213,18 @@ export default function StaffPage() {
           </div>
         </div>
 
+        {!loading && sellerZones.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-amber-200 p-8 text-center shadow-sm">
+            <p className="text-sm text-gray-600 mb-4">{t('staffNoZonesMsg')}</p>
+            <Link
+              href="/delivery-zones"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-all"
+            >
+              {t('goToZonesBtn')}
+            </Link>
+          </div>
+        ) : (
+          <>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white shadow-sm shadow-red-200">
             <Users size={16} />
@@ -212,6 +241,10 @@ export default function StaffPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
+        ) : allCouriers.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center shadow-sm">
+            <p className="text-sm text-gray-500">{t('staffNoCourierPoolMsg')}</p>
+          </div>
         ) : (
 
           /* ===== ТАБЛИЦА КУРЬЕРОВ ===== */
@@ -263,7 +296,8 @@ export default function StaffPage() {
                             {link.zone_name}
                             <button
                               onClick={() => unassignZone(link.id)}
-                              className="hover:opacity-70"
+                              disabled={unassigningId === link.id}
+                              className="hover:opacity-70 disabled:opacity-30"
                               title="Отвязать зону"
                             >
                               <X size={12} />
@@ -286,7 +320,8 @@ export default function StaffPage() {
                         </button>
                         <button
                           onClick={() => deleteCourier(c.id)}
-                          className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                          disabled={deletingId === c.id}
+                          className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
                         >
                           <Trash2 size={13} />
                           {t('delete')}
@@ -298,6 +333,8 @@ export default function StaffPage() {
               </tbody>
             </table>
           </div>
+        )}
+          </>
         )}
       </main>
 
@@ -369,11 +406,7 @@ export default function StaffPage() {
         </div>
       )}
 
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[60] bg-gray-900 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg">
-          {toastMessage}
-        </div>
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

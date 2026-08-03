@@ -214,7 +214,7 @@ export default function DocsPage() {
             </div>
 
             <div className="mt-5 rounded-2xl border border-dashed border-gray-200 p-8 text-center">
-              <p className="text-sm text-gray-400">Остальные разделы документации в разработке.</p>
+              <p className="text-sm text-gray-400">Остальные разделы документации дополним позже.</p>
               <p className="mt-1 text-sm text-gray-300">
                 Вопросы?{' '}
                 <Link href="/contacts" className="text-primary hover:underline">Напишите нам</Link>

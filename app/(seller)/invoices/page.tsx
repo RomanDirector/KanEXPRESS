@@ -7,6 +7,7 @@ import JsBarcode from 'jsbarcode'
 import QRCode from 'qrcode'
 import { Download } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { Toast } from '@/components/Toast'
 
 interface Order {
   id: string
@@ -26,6 +27,14 @@ interface SellerInfo {
   phone: string | null
 }
 
+// jsPDF-текст пишется в документ, который держит в руках клиент и курьер —
+// поэтому статусы и подписи здесь всегда на русском, независимо от языка интерфейса.
+const STATUS_RU: Record<string, string> = {
+  pending: 'Не отгружено',
+  in_transit: 'В пути',
+  delivered: 'Доставлено',
+}
+
 async function generatePDF(order: Order, seller: SellerInfo | null) {
   const doc = new jsPDF()
 
@@ -34,7 +43,7 @@ async function generatePDF(order: Order, seller: SellerInfo | null) {
   doc.text('KanEXpress', 20, 20)
   doc.setFontSize(12)
   doc.setTextColor(0, 0, 0)
-  doc.text('Invoice', 20, 30)
+  doc.text('Накладная', 20, 30)
 
   if (order.zone_id && order.zones?.name) {
     doc.setFontSize(28)
@@ -71,10 +80,10 @@ async function generatePDF(order: Order, seller: SellerInfo | null) {
 
   let y = tableTop + tableH + 12
   doc.setFontSize(11)
-  doc.text(`Order: ${order.order_number}`, 20, y); y += 10
-  doc.text(`Price: ${order.price} KZT`, 20, y); y += 10
-  doc.text(`Status: ${order.status}`, 20, y); y += 10
-  doc.text(`Date: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, 20, y); y += 10
+  doc.text(`Заказ: ${order.order_number}`, 20, y); y += 10
+  doc.text(`Цена: ${order.price} ₸`, 20, y); y += 10
+  doc.text(`Статус: ${STATUS_RU[order.status] ?? order.status}`, 20, y); y += 10
+  doc.text(`Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, 20, y); y += 10
 
   if (order.product_name) {
     doc.text(order.product_name, 20, y)
@@ -94,7 +103,7 @@ async function generatePDF(order: Order, seller: SellerInfo | null) {
   doc.line(20, y, 190, y)
   doc.setFontSize(9)
   doc.setTextColor(150, 150, 150)
-  doc.text('KanEXpress — Logistics for Kaspi.kz sellers', 20, y + 7)
+  doc.text('KanEXpress — логистика для продавцов Kaspi.kz', 20, y + 7)
 
   doc.save(`invoice-${order.order_number}.pdf`)
 }
@@ -134,6 +143,9 @@ export default function InvoicesPage() {
   const [seller, setSeller] = useState<SellerInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [downloadingAll, setDownloadingAll] = useState(false)
+  const [generatingId, setGeneratingId] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -157,8 +169,10 @@ export default function InvoicesPage() {
           .eq('id', user.id)
           .maybeSingle(),
       ])
-      if (error) console.error(error.message)
-      else setOrders((data || []) as unknown as Order[])
+      if (error) {
+        console.error(error.message)
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
+      } else setOrders((data || []) as unknown as Order[])
       if (sellerError) console.error(sellerError.message)
       else setSeller(sellerData as SellerInfo | null)
       setLoading(false)
@@ -181,9 +195,17 @@ export default function InvoicesPage() {
   }
 
   const downloadSelected = async () => {
+    setDownloadingAll(true)
     const toDownload = selected.size > 0 ? orders.filter(o => selected.has(o.id)) : orders
-    for (const order of toDownload) {
-      await generatePDF(order, seller)
+    try {
+      for (const order of toDownload) {
+        await generatePDF(order, seller)
+      }
+    } catch (err) {
+      console.error(err)
+      setToast({ message: t('invoiceGenerateErrorMsg'), type: 'error' })
+    } finally {
+      setDownloadingAll(false)
     }
   }
 
@@ -192,14 +214,19 @@ export default function InvoicesPage() {
       <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('invoices')}</h1>
-          <p className="text-sm text-gray-400 mt-0.5">PDF + QR + Barcode</p>
+          <p className="text-sm text-gray-400 mt-0.5">PDF + QR + Штрихкод</p>
         </div>
         <button
           onClick={downloadSelected}
-          className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-red-100"
+          disabled={downloadingAll || orders.length === 0}
+          className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-red-100 disabled:opacity-50"
         >
           <Download size={16} />
-          {selected.size > 0 ? `${t('downloadSelected')} (${selected.size})` : t('downloadInvoices')}
+          {downloadingAll
+            ? t('loading')
+            : selected.size > 0
+            ? `${t('downloadSelected')} (${selected.size})`
+            : t('downloadInvoices')}
         </button>
       </header>
 
@@ -224,7 +251,7 @@ export default function InvoicesPage() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('address')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('price')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">PDF</th>
-                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Label</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('labelBtn')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -244,18 +271,40 @@ export default function InvoicesPage() {
                     <td className="px-4 py-4 font-bold text-gray-900">{order.price?.toLocaleString('ru-RU')} ₸</td>
                     <td className="px-4 py-4">
                       <button
-                        onClick={() => generatePDF(order, seller)}
-                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+                        onClick={async () => {
+                          setGeneratingId(order.id)
+                          try {
+                            await generatePDF(order, seller)
+                          } catch (err) {
+                            console.error(err)
+                            setToast({ message: t('invoiceGenerateErrorMsg'), type: 'error' })
+                          } finally {
+                            setGeneratingId(null)
+                          }
+                        }}
+                        disabled={generatingId === order.id}
+                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
                       >
                         PDF + QR
                       </button>
                     </td>
                     <td className="px-4 py-4">
                       <button
-                        onClick={() => generateLabel(order)}
-                        className="border border-red-600 text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+                        onClick={async () => {
+                          setGeneratingId(order.id)
+                          try {
+                            await generateLabel(order)
+                          } catch (err) {
+                            console.error(err)
+                            setToast({ message: t('labelGenerateErrorMsg'), type: 'error' })
+                          } finally {
+                            setGeneratingId(null)
+                          }
+                        }}
+                        disabled={generatingId === order.id}
+                        className="border border-red-600 text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
                       >
-                        🏷️ Ярлык
+                        🏷️ {t('labelBtn')}
                       </button>
                     </td>
                   </tr>
@@ -265,6 +314,8 @@ export default function InvoicesPage() {
           </div>
         )}
       </main>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

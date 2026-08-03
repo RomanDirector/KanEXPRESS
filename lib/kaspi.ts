@@ -181,11 +181,10 @@ export async function confirmDeliveryCode({ token, kaspiOrderId, orderCode, secu
   return { status }
 }
 
-// --- Публикация цен через Kaspi Merchant API (KASPI_MERCHANT_TOKEN/KASPI_MERCHANT_ID) ---
+// --- Публикация цен через Kaspi Merchant API ---
 //
-// В отличие от fetchKaspiOrders выше (мультитенантно, токен каждого продавца из sellers.kaspi_token),
-// обновление цены пока рассчитано на один общий мерчант-токен из env. Если/когда демпинг станет
-// многотенантным по-настоящему, эту часть нужно будет перевести на per-seller токены так же, как orders.
+// Мультитенантно, как fetchKaspiOrders выше: токен и shopId каждого продавца берутся
+// из sellers.kaspi_token/kaspi_shop_id и передаются параметрами, а не через общий env.
 
 // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: пути ниже — предположение по аналогии с /orders (JSON:API,
 // PATCH ресурса товара). Реальные эндпоинты и формат тела запроса для обновления цены нужно
@@ -194,25 +193,7 @@ const KASPI_PRICE_ENDPOINTS = {
   product: (sku: string) => `/products/${encodeURIComponent(sku)}`,
 }
 
-function getToken(): string {
-  const token = process.env.KASPI_MERCHANT_TOKEN
-  if (!token) {
-    throw new Error('KASPI_MERCHANT_TOKEN не задан в переменных окружения')
-  }
-  return token
-}
-
-function getMerchantId(): string {
-  const id = process.env.KASPI_MERCHANT_ID
-  if (!id) {
-    throw new Error('KASPI_MERCHANT_ID не задан в переменных окружения')
-  }
-  return id
-}
-
-async function kaspiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken()
-
+async function kaspiFetch(token: string, path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(`${KASPI_API_BASE}${path}`, {
     ...init,
     headers: {
@@ -233,24 +214,25 @@ async function kaspiFetch(path: string, init: RequestInit = {}): Promise<Respons
   return res
 }
 
-export async function updateProductPrice(sku: string, price: number): Promise<void> {
-  const merchantId = getMerchantId()
+export async function updateProductPrice({ token, shopId, sku, price }: {
+  token: string; shopId?: string; sku: string; price: number
+}): Promise<void> {
   // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: метод (PATCH) и форма тела запроса — предположение
   // по JSON:API конвенции, сверить с реальным Merchant API перед продом.
-  await kaspiFetch(KASPI_PRICE_ENDPOINTS.product(sku), {
+  await kaspiFetch(token, KASPI_PRICE_ENDPOINTS.product(sku), {
     method: 'PATCH',
     body: JSON.stringify({
       data: {
         type: 'products',
         id: sku,
-        attributes: { price, merchantId },
+        attributes: { price, ...(shopId ? { merchantId: shopId } : {}) },
       },
     }),
   })
 }
 
-export async function getProductPrice(sku: string): Promise<number> {
-  const res = await kaspiFetch(KASPI_PRICE_ENDPOINTS.product(sku), { method: 'GET' })
+export async function getProductPrice({ token, sku }: { token: string; sku: string }): Promise<number> {
+  const res = await kaspiFetch(token, KASPI_PRICE_ENDPOINTS.product(sku), { method: 'GET' })
   const json = (await res.json()) as { data?: { attributes?: { price?: number } } }
   // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: путь до цены в ответе (data.attributes.price) — предположение.
   const price = json.data?.attributes?.price

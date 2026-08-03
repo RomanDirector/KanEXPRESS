@@ -10,13 +10,40 @@ import { Navbar } from '@/components/layout/navbar'
 import { supabase } from '@/lib/supabase'
 import { getPendingRegistration, clearPendingRegistration } from '@/lib/pending-registration'
 import { ensureProfileExists } from '@/lib/ensure-profile'
+import { useLang } from '@/lib/i18n'
 
 export default function LoginPage() {
   const router = useRouter()
+  const { t } = useLang()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const [forgotOpen, setForgotOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSending, setResetSending] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
+  const [resetError, setResetError] = useState('')
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setResetError('')
+    setResetSending(true)
+
+    const { error: resetErr } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+
+    setResetSending(false)
+
+    if (resetErr) {
+      setResetError(t('forgotPasswordErrorPrefix') + resetErr.message)
+      return
+    }
+
+    setResetSent(true)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -38,39 +65,33 @@ export default function LoginPage() {
 
     // admins проверяется первой: если id случайно есть в нескольких таблицах
     // одновременно, приоритет всегда у admin.
-    console.log('DEBUG: проверяю admins для id', userId)
-    const { data: admin, error: adminError } = await supabase
+    const { data: admin } = await supabase
       .from('admins')
       .select('id')
       .eq('id', userId)
       .maybeSingle()
-    console.log('DEBUG: результат admins', admin, adminError)
 
     if (admin) {
       router.push('/admin')
       return
     }
 
-    console.log('DEBUG: проверяю couriers для id', userId)
-    const { data: courier, error: courierError } = await supabase
+    const { data: courier } = await supabase
       .from('couriers')
       .select('id')
       .eq('id', userId)
       .maybeSingle()
-    console.log('DEBUG: результат couriers', courier, courierError)
 
     if (courier) {
       router.push('/courier-dashboard')
       return
     }
 
-    console.log('DEBUG: проверяю sellers для id', userId)
-    const { data: seller, error: sellerError } = await supabase
+    const { data: seller } = await supabase
       .from('sellers')
       .select('id')
       .eq('id', userId)
       .maybeSingle()
-    console.log('DEBUG: результат sellers', seller, sellerError)
 
     if (seller) {
       router.push('/dashboard')
@@ -82,9 +103,7 @@ export default function LoginPage() {
     // в couriers/sellers тогда не прошёл бы (не было сессии для RLS).
     // Черновик анкеты лежит в pending_registrations (не в localStorage) —
     // сработает даже если регистрировались с другого устройства.
-    console.log('DEBUG: проверяю pending_registrations для id', userId)
     const pending = await getPendingRegistration(supabase, userId)
-    console.log('DEBUG: результат pending_registrations', pending)
 
     if (!pending) {
       setLoading(false)
@@ -122,48 +141,92 @@ export default function LoginPage() {
 
           {/* Карточка формы */}
           <div className="bg-white rounded-2xl shadow-sm p-8 space-y-5">
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Пароль</Label>
-                  <a href="#" className="text-xs text-gray-400 hover:text-primary transition-colors">
-                    Забыли пароль?
-                  </a>
+            {forgotOpen ? (
+              <form onSubmit={handleForgotSubmit} className="space-y-5">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">{t('forgotPasswordTitle')}</h2>
+                  <p className="mt-1 text-xs text-gray-400">{t('forgotPasswordEmailLabel')}</p>
                 </div>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
 
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 accent-primary cursor-pointer"
-                />
-                <span className="text-sm text-gray-400">Запомнить меня</span>
-              </label>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
+                  <Input
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                  />
+                </div>
 
-              {error && <p className="text-sm text-destructive">{error}</p>}
+                {resetError && <p className="text-sm text-destructive">{resetError}</p>}
+                {resetSent && <p className="text-sm text-green-600">{t('forgotPasswordSentMsg')}</p>}
 
-              <Button type="submit" disabled={loading} className="w-full rounded-full py-6 text-base font-semibold">
-                {loading ? 'Входим...' : 'Войти'}
-              </Button>
-            </form>
+                <Button type="submit" disabled={resetSending} className="w-full rounded-full py-6 text-base font-semibold">
+                  {resetSending ? t('forgotPasswordSendingLabel') : t('forgotPasswordSendBtn')}
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={() => setForgotOpen(false)}
+                  className="w-full text-center text-xs text-gray-400 hover:text-primary transition-colors"
+                >
+                  {t('forgotPasswordBackBtn')}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-gray-500 uppercase tracking-wide">Email</Label>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-gray-500 uppercase tracking-wide">Пароль</Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetEmail(email)
+                        setResetSent(false)
+                        setResetError('')
+                        setForgotOpen(true)
+                      }}
+                      className="text-xs text-gray-400 hover:text-primary transition-colors"
+                    >
+                      Забыли пароль?
+                    </button>
+                  </div>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 accent-primary cursor-pointer"
+                  />
+                  <span className="text-sm text-gray-400">Запомнить меня</span>
+                </label>
+
+                {error && <p className="text-sm text-destructive">{error}</p>}
+
+                <Button type="submit" disabled={loading} className="w-full rounded-full py-6 text-base font-semibold">
+                  {loading ? 'Входим...' : 'Войти'}
+                </Button>
+              </form>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">

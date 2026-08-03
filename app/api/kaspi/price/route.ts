@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { getSubscriptionState } from '@/lib/limits'
-import { updateProductPrice } from '@/lib/kaspi'
+import { updateProductPrice, isValidKaspiToken } from '@/lib/kaspi'
 
 async function createRouteClient() {
   const cookieStore = await cookies()
@@ -92,8 +92,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'У товара не заполнен артикул (SKU)' }, { status: 422 })
   }
 
+  // Публикуем в магазин самого продавца — его собственный kaspi_token/kaspi_shop_id,
+  // а не общий env-токен (см. fetchKaspiOrders/requestDeliveryCode — тот же паттерн).
+  let sellerToken: string
+  let sellerShopId: string | undefined
   try {
-    await updateProductPrice(rule.sku, rule.current_price)
+    const { data: seller, error: sellerErr } = await admin
+      .from('sellers')
+      .select('kaspi_token, kaspi_shop_id')
+      .eq('id', rule.seller_id)
+      .maybeSingle()
+
+    if (sellerErr) {
+      console.error('[kaspi/price] seller lookup failed:', sellerErr)
+      return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })
+    }
+
+    // process.env.KASPI_MERCHANT_TOKEN — только фолбэк для локальной отладки,
+    // основной источник токена всегда sellers.kaspi_token.
+    const token = isValidKaspiToken(seller?.kaspi_token) ? seller!.kaspi_token : process.env.KASPI_MERCHANT_TOKEN
+    if (!token) {
+      return NextResponse.json({ error: 'Kaspi API токен не настроен. Добавьте его в Профиле' }, { status: 422 })
+    }
+    sellerToken = token
+    sellerShopId = seller?.kaspi_shop_id ?? undefined
+  } catch (err) {
+    console.error('[kaspi/price] seller token lookup failed:', err)
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })
+  }
+
+  try {
+    await updateProductPrice({ token: sellerToken, shopId: sellerShopId, sku: rule.sku, price: rule.current_price })
 
     await admin.from('demping_history').insert({
       rule_id: rule.id,

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useLang, localeTag } from '@/lib/i18n';
 import { checkLimit, formatLimit, getSubscriptionState, type SubscriptionState } from '@/lib/limits';
@@ -47,6 +47,25 @@ export default function DempingPage() {
   const [autoScheduleEnabled, setAutoScheduleEnabled] = useState(false);
   const [savingAutoSchedule, setSavingAutoSchedule] = useState(false);
   const [subState, setSubState] = useState<SubscriptionState | null>(null);
+  const [addingRule, setAddingRule] = useState(false);
+  // Блокировка построчных действий по id правила (не общим флагом), чтобы клик
+  // по одной строке не отключал кнопки во всех остальных. Значение — какое именно
+  // действие идёт, чтобы спиннер показывался только на нажатой кнопке.
+  const [busyRules, setBusyRules] = useState<Record<string, 'decrease' | 'recalc' | 'toggle' | 'delete'>>({});
+  const isRowBusy = (id: string) => Boolean(busyRules[id]);
+  async function runRowAction(id: string, action: 'decrease' | 'recalc' | 'toggle' | 'delete', fn: () => Promise<void>) {
+    if (busyRules[id]) return;
+    setBusyRules((prev) => ({ ...prev, [id]: action }));
+    try {
+      await fn();
+    } finally {
+      setBusyRules((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  }
 
   const [newName, setNewName] = useState('');
   const [newSku, setNewSku] = useState('');
@@ -62,6 +81,16 @@ export default function DempingPage() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  // Escape закрывает модалку с инструкцией по cron, как и остальные модалки в проекте.
+  useEffect(() => {
+    if (!showCronInfo) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowCronInfo(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showCronInfo]);
 
   async function loadAll() {
     setLoading(true);
@@ -150,14 +179,23 @@ export default function DempingPage() {
       });
       return;
     }
+    if (Number(newPrice) <= 0 || Number(newMin) <= 0 || Number(newMax) <= 0) {
+      setToast({ message: t('pricesNotPositiveErrorMsg'), type: 'error' });
+      return;
+    }
     if (Number(newMin) >= Number(newMax)) {
       setToast({ message: t('minMaxPriceErrorMsg'), type: 'error' });
+      return;
+    }
+    if (Number(newStep) <= 0) {
+      setToast({ message: t('stepNotPositiveErrorMsg'), type: 'error' });
       return;
     }
     if (newFollowCompetitor && Number(newFollowStep) <= 0) {
       setToast({ message: t('followStepErrorMsg'), type: 'error' });
       return;
     }
+    setAddingRule(true);
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     const sellerId = userData?.user?.id;
     if (userErr || !sellerId) {
@@ -166,6 +204,7 @@ export default function DempingPage() {
         message: t('resolveUserErrorPrefix') + (userErr?.message || t('sessionExpiredMsg')),
         type: 'error',
       });
+      setAddingRule(false);
       return;
     }
 
@@ -175,6 +214,7 @@ export default function DempingPage() {
     }
     if (!allowed) {
       alert(t('limitReachedMsg').replace('{max}', formatLimit(max)));
+      setAddingRule(false);
       return;
     }
 
@@ -207,6 +247,7 @@ export default function DempingPage() {
       setToast({ message: t('ruleAddedMsg'), type: 'success' });
       loadAll();
     }
+    setAddingRule(false);
   }
 
   async function toggleActive(rule: Rule) {
@@ -242,8 +283,12 @@ export default function DempingPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        // Роут /api/kaspi/price — серверный код, отвечает фиксированной русской строкой
+        // (не может звать t()). На казахском UI подменяем на переведённый текст.
+        const errorText =
+          body.error === 'У товара не заполнен артикул (SKU)' ? t('skuMissingErrorMsg') : body.error;
         setToast({
-          message: t('kaspiPublishFailedPrefix') + (body.error || t('serverErrorGeneric')),
+          message: t('kaspiPublishFailedPrefix') + (errorText || t('serverErrorGeneric')),
           type: 'error',
         });
       }
@@ -553,14 +598,18 @@ export default function DempingPage() {
 
       {tab === 'rules' && (
         <>
-          <div className="bg-white rounded-xl border p-4 mb-4 flex flex-wrap items-end gap-3">
+          <form
+            onSubmit={(e) => { e.preventDefault(); addRule(); }}
+            className="bg-white rounded-xl border p-4 mb-4 flex flex-wrap items-end gap-3"
+          >
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('productHeader')}</span>
+              <span className="block text-xs text-gray-500">{t('productHeader')} *</span>
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 className="border rounded px-2 py-1.5 w-48"
                 placeholder={t('productNamePlaceholder')}
+                required
               />
             </label>
             <label className="text-sm">
@@ -573,39 +622,51 @@ export default function DempingPage() {
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('currentPriceLabel')}</span>
+              <span className="block text-xs text-gray-500">{t('currentPriceLabel')} *</span>
               <input
                 type="number"
+                min="1"
+                step="any"
                 value={newPrice}
                 onChange={(e) => setNewPrice(e.target.value)}
                 className="border rounded px-2 py-1.5 w-32"
+                required
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('minPriceLabel')}</span>
+              <span className="block text-xs text-gray-500">{t('minPriceLabel')} *</span>
               <input
                 type="number"
+                min="1"
+                step="any"
                 value={newMin}
                 onChange={(e) => setNewMin(e.target.value)}
                 className="border rounded px-2 py-1.5 w-32"
+                required
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('maxPriceLabel')}</span>
+              <span className="block text-xs text-gray-500">{t('maxPriceLabel')} *</span>
               <input
                 type="number"
+                min="1"
+                step="any"
                 value={newMax}
                 onChange={(e) => setNewMax(e.target.value)}
                 className="border rounded px-2 py-1.5 w-32"
+                required
               />
             </label>
             <label className="text-sm">
-              <span className="block text-xs text-gray-500">{t('stepLabel')}</span>
+              <span className="block text-xs text-gray-500">{t('stepLabel')} *</span>
               <input
                 type="number"
+                min="1"
+                step="any"
                 value={newStep}
                 onChange={(e) => setNewStep(e.target.value)}
                 className="border rounded px-2 py-1.5 w-24"
+                required
               />
             </label>
             <label className="text-sm">
@@ -647,12 +708,13 @@ export default function DempingPage() {
               </label>
             )}
             <button
-              onClick={addRule}
-              className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold"
+              type="submit"
+              disabled={addingRule}
+              className="px-4 py-2 rounded bg-blue-600 text-white text-sm font-semibold disabled:opacity-50"
             >
-              {t('addRuleBtn')}
+              {addingRule ? t('loading') : t('addRuleBtn')}
             </button>
-          </div>
+          </form>
 
           <div className="bg-white rounded-xl border overflow-x-auto">
             <table className="w-full text-sm">
@@ -684,7 +746,8 @@ export default function DempingPage() {
                 {!loading && rules.length === 0 && (
                   <tr>
                     <td colSpan={13} className="p-6 text-center text-gray-500">
-                      {t('noRules')}
+                      <p>{t('noRules')}</p>
+                      <p className="text-xs text-gray-400 mt-1">{t('dempingNoRulesMsg')}</p>
                     </td>
                   </tr>
                 )}
@@ -770,13 +833,15 @@ export default function DempingPage() {
                       </td>
                       <td className="p-3">
                         <button
-                          onClick={() => toggleActive(r)}
-                          className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          onClick={() => runRowAction(r.id, 'toggle', () => toggleActive(r))}
+                          disabled={isRowBusy(r.id)}
+                          className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 disabled:opacity-50 ${
                             r.is_active
                               ? 'bg-green-100 text-green-700'
                               : 'bg-gray-100 text-gray-500'
                           }`}
                         >
+                          {busyRules[r.id] === 'toggle' && <Loader2 size={12} className="animate-spin" />}
                           {r.is_active ? t('on') : t('off')}
                         </button>
                       </td>
@@ -793,25 +858,37 @@ export default function DempingPage() {
                       </td>
                       <td className="p-3 flex gap-2">
                         <button
-                          onClick={() => decreaseOnce(r)}
-                          disabled={stepDisabled || isExpired}
-                          title={isExpired ? t('subscriptionExpiredTooltip') : undefined}
-                          className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
+                          onClick={() => runRowAction(r.id, 'decrease', () => decreaseOnce(r))}
+                          disabled={stepDisabled || isExpired || isRowBusy(r.id)}
+                          title={
+                            isExpired
+                              ? t('subscriptionExpiredTooltip')
+                              : atMin
+                              ? t('stuckAtMinTooltip')
+                              : !r.is_active
+                              ? t('ruleInactiveTooltip')
+                              : undefined
+                          }
+                          className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-40 inline-flex items-center gap-1"
                         >
+                          {busyRules[r.id] === 'decrease' && <Loader2 size={12} className="animate-spin" />}
                           {t('decreaseStepBtn')}
                         </button>
                         <button
-                          onClick={() => recalcByCompetitorBtn(r)}
-                          disabled={!r.follow_competitor || r.competitor_price == null || !r.is_active || isExpired}
+                          onClick={() => runRowAction(r.id, 'recalc', () => recalcByCompetitorBtn(r))}
+                          disabled={!r.follow_competitor || r.competitor_price == null || !r.is_active || isExpired || isRowBusy(r.id)}
                           title={isExpired ? t('subscriptionExpiredTooltip') : undefined}
-                          className="px-3 py-1 rounded bg-purple-600 text-white text-xs font-semibold disabled:opacity-40"
+                          className="px-3 py-1 rounded bg-purple-600 text-white text-xs font-semibold disabled:opacity-40 inline-flex items-center gap-1"
                         >
+                          {busyRules[r.id] === 'recalc' && <Loader2 size={12} className="animate-spin" />}
                           {t('recalcByCompetitorBtn')}
                         </button>
                         <button
-                          onClick={() => deleteRule(r)}
-                          className="px-3 py-1 rounded border text-xs text-red-600"
+                          onClick={() => runRowAction(r.id, 'delete', () => deleteRule(r))}
+                          disabled={isRowBusy(r.id)}
+                          className="px-3 py-1 rounded border text-xs text-red-600 disabled:opacity-40 inline-flex items-center gap-1"
                         >
+                          {busyRules[r.id] === 'delete' && <Loader2 size={12} className="animate-spin" />}
                           {t('delete')}
                         </button>
                       </td>

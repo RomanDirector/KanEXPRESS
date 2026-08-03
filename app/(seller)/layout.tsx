@@ -114,7 +114,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
         )}
         <div className="bg-red-50 rounded-xl p-3 border border-red-100">
           <p className="text-xs font-bold text-red-600">KanExpress</p>
-          <p className="text-xs text-gray-400 mt-0.5">Logistics for Kaspi.kz</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t('sidebarTagline')}</p>
         </div>
       </div>
       </aside>

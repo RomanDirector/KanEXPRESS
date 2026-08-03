@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import dynamic from 'next/dynamic'
-import { MapPin, Package, Truck, CheckCircle, X } from 'lucide-react'
+import { MapPin, Package, Truck, CheckCircle, X, ArrowLeft } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { Toast } from '@/components/Toast'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -22,18 +24,21 @@ interface Order {
   created_at: string
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  pending:    { label: 'Не отгружено', color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',  icon: <Package size={14} /> },
-  in_transit: { label: 'В пути',       color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={14} /> },
-  delivered:  { label: 'Доставлено',   color: 'text-green-700',  bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={14} /> },
+const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
+  pending:    { color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',  icon: <Package size={14} /> },
+  in_transit: { color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={14} /> },
+  delivered:  { color: 'text-green-700',  bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={14} /> },
 }
 
 // Курьер мог принять заказ сканом (status = 'in_transit'), но ещё не нажать
 // "Выехал" на своём дашборде (courier_stage остаётся 'not_started') — в этом
 // окне заказ физически лежит у курьера, а не едет к клиенту.
-function getStatusLabel(order: Pick<Order, 'status' | 'courier_stage'>): string {
-  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return 'Отгружено'
-  return STATUS_CONFIG[order.status]?.label ?? order.status
+function getStatusLabel(order: Pick<Order, 'status' | 'courier_stage'>, t: (key: any) => string): string {
+  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return t('shipped')
+  if (order.status === 'pending' || order.status === 'in_transit' || order.status === 'delivered') {
+    return t(order.status)
+  }
+  return order.status
 }
 
 export default function MapPage() {
@@ -42,6 +47,7 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -58,12 +64,25 @@ export default function MapPage() {
         .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
-      if (error) console.error(error.message)
-      else setOrders(data as Order[])
+      if (error) {
+        console.error(error.message)
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
+      } else setOrders(data as Order[])
       setLoading(false)
     }
     fetchOrders()
   }, [])
+
+  // Escape снимает выделение заказа (закрывает попап), пока пользователь не
+  // застревает на карте без явного способа вернуться к общему виду.
+  useEffect(() => {
+    if (!selectedOrder) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedOrder(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedOrder])
 
   const filteredOrders = orders.filter(o =>
     filterStatus === 'all' ? true : o.status === filterStatus
@@ -91,6 +110,13 @@ export default function MapPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
         <div>
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-1.5 text-sm font-semibold text-gray-500 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft size={16} />
+            {t('back')}
+          </Link>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('mapTitle')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">{t('mapSub')}</p>
         </div>
@@ -105,7 +131,7 @@ export default function MapPage() {
 
       <main className="px-8 py-6 max-w-7xl mx-auto">
         {/* Фильтр статусов */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-4">
           {['all', 'pending', 'in_transit', 'delivered'].map(s => (
             <button
               key={s}
@@ -122,6 +148,15 @@ export default function MapPage() {
               </span>
             </button>
           ))}
+          {selectedOrder && (
+            <button
+              onClick={() => setSelectedOrder(null)}
+              className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
+            >
+              <X size={14} />
+              {t('clearSelection')}
+            </button>
+          )}
         </div>
 
         <div className="flex gap-6">
@@ -135,7 +170,9 @@ export default function MapPage() {
               <MapGL
                 points={mapPoints}
                 height="600px"
+                selectedId={selectedOrder?.id ?? null}
                 onPointClick={handlePointClick}
+                onBackgroundClick={() => setSelectedOrder(null)}
               />
             )}
           </div>
@@ -156,7 +193,7 @@ export default function MapPage() {
                   <span className="font-mono font-bold text-gray-900 text-sm">{order.order_number}</span>
                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_CONFIG[order.status]?.bg} ${STATUS_CONFIG[order.status]?.color}`}>
                     {STATUS_CONFIG[order.status]?.icon}
-                    {getStatusLabel(order)}
+                    {getStatusLabel(order, t)}
                   </span>
                 </div>
                 <div className="flex items-start gap-1.5 text-xs text-gray-500">
@@ -179,8 +216,14 @@ export default function MapPage() {
 
         {/* Попап деталей заказа */}
         {selectedOrder && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
+          <div
+            className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4"
+            onClick={() => setSelectedOrder(null)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-black text-gray-900 text-lg">{t('orderDetails')}</h3>
                 <button
@@ -216,7 +259,7 @@ export default function MapPage() {
                   <span className="text-sm text-gray-500">{t('status')}</span>
                   <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${STATUS_CONFIG[selectedOrder.status]?.bg} ${STATUS_CONFIG[selectedOrder.status]?.color}`}>
                     {STATUS_CONFIG[selectedOrder.status]?.icon}
-                    {getStatusLabel(selectedOrder)}
+                    {getStatusLabel(selectedOrder, t)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -229,12 +272,14 @@ export default function MapPage() {
                 onClick={() => setSelectedOrder(null)}
                 className="w-full mt-5 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-all"
               >
-                Закрыть
+                {t('close')}
               </button>
             </div>
           </div>
         )}
       </main>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

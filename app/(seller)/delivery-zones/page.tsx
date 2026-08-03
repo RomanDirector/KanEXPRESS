@@ -50,6 +50,7 @@ export default function DeliveryZonesPage() {
         .eq('seller_id', user.id)
       if (error) {
         console.error(error.message)
+        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
         return
       }
       const points = (data || [])
@@ -108,6 +109,11 @@ export default function DeliveryZonesPage() {
           </button>
         </div>
       </div>
+      {noZones && (
+        <div className="px-6 py-3 bg-blue-50 border-b border-blue-100 text-sm text-blue-700">
+          {t('zonesEmptyHintMsg')}
+        </div>
+      )}
       <ZoneMapEditor orders={orders} />
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
