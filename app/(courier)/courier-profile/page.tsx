@@ -15,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Store, Wallet, TrendingUp, CheckCircle, Package, Truck, MapPin, RotateCcw, Banknote, Ban } from 'lucide-react'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 
 type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
@@ -29,13 +30,14 @@ interface Order {
   is_paid_to_courier: boolean
 }
 
-const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; className: string }> = {
-  not_started: { label: 'Не начато', icon: Package, className: 'border-gray-200 bg-gray-50 text-gray-600' },
-  departed:    { label: 'Выехал',    icon: Truck,    className: 'border-blue-200 bg-blue-50 text-blue-700' },
-  arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
-  returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
-  cancelled:   { label: 'Отменено',  icon: Ban,       className: 'border-red-200 bg-red-50 text-red-700' },
+const STAGE_ICON: Record<DisplayStage, typeof Package> = {
+  not_started: Package,
+  dropped: Package,
+  departed: Truck,
+  arrived: MapPin,
+  delivered: CheckCircle,
+  returned: RotateCcw,
+  cancelled: Ban,
 }
 
 const HISTORY_LIMIT = 15
@@ -386,8 +388,8 @@ export default function CourierProfilePage() {
                     </TableHeader>
                     <TableBody>
                       {historyOrders.map((order) => {
-                        const stage = STAGE_CONFIG[order.courier_stage]
-                        const StageIcon = stage.icon
+                        const stage = getDisplayStage(order)
+                        const StageIcon = STAGE_ICON[stage]
                         return (
                           <TableRow key={order.id}>
                             <TableCell className="font-mono font-medium">{order.order_number}</TableCell>
@@ -403,9 +405,9 @@ export default function CourierProfilePage() {
                               )}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline" className={`gap-1 ${stage.className}`}>
+                              <Badge variant="outline" className={`gap-1 ${STAGE_BADGE_CLASS[stage]}`}>
                                 <StageIcon className="h-3 w-3" />
-                                {stage.label}
+                                {STAGE_LABEL[stage]}
                               </Badge>
                             </TableCell>
                             <TableCell className="font-bold">{order.courier_fee} ₸</TableCell>

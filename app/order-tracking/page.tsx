@@ -14,29 +14,29 @@ import {
   Ban,
   SearchX,
 } from 'lucide-react'
-
-type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 
 interface TrackResult {
   found: boolean
   order_number?: string
   status?: string
-  courier_stage?: CourierStage
+  courier_stage?: string
   client_address?: string
   created_at?: string
   queue_position?: number
 }
 
-const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; className: string }> = {
-  not_started: { label: 'Ожидает выезда курьера', icon: Package, className: 'border-gray-200 bg-gray-50 text-gray-600' },
-  departed: { label: 'Курьер в пути', icon: Truck, className: 'border-blue-200 bg-blue-50 text-blue-700' },
-  arrived: { label: 'Курьер на месте', icon: MapPin, className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  delivered: { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
-  returned: { label: 'Возврат', icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
-  cancelled: { label: 'Заказ отменён', icon: Ban, className: 'border-red-200 bg-red-50 text-red-700' },
+const STAGE_ICON: Record<DisplayStage, typeof Package> = {
+  not_started: Package,
+  dropped: Package,
+  departed: Truck,
+  arrived: MapPin,
+  delivered: CheckCircle,
+  returned: RotateCcw,
+  cancelled: Ban,
 }
 
-const TERMINAL_STAGES: CourierStage[] = ['delivered', 'returned', 'cancelled']
+const TERMINAL_STAGES: DisplayStage[] = ['delivered', 'returned', 'cancelled']
 
 export default function OrderTrackingPage() {
   const [orderNumber, setOrderNumber] = useState('')
@@ -77,8 +77,11 @@ export default function OrderTrackingPage() {
     }
   }
 
-  const stage = result?.found && result.courier_stage ? STAGE_CONFIG[result.courier_stage] : null
-  const StageIcon = stage?.icon
+  const stage =
+    result?.found && result.status && result.courier_stage
+      ? getDisplayStage({ status: result.status, courier_stage: result.courier_stage })
+      : null
+  const StageIcon = stage ? STAGE_ICON[stage] : null
 
   return (
     <div className="min-h-full flex flex-col bg-[#f8f8f8]">
@@ -149,9 +152,9 @@ export default function OrderTrackingPage() {
               <span className="font-mono text-sm font-bold text-gray-900">
                 {result.order_number}
               </span>
-              <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${stage.className}`}>
+              <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${STAGE_BADGE_CLASS[stage]}`}>
                 <StageIcon size={12} />
-                {stage.label}
+                {STAGE_LABEL[stage]}
               </div>
             </div>
 
@@ -160,7 +163,7 @@ export default function OrderTrackingPage() {
               <span>{result.client_address}</span>
             </div>
 
-            {!TERMINAL_STAGES.includes(result.courier_stage as CourierStage) && (
+            {!TERMINAL_STAGES.includes(stage) && (
               <div className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
                 Ваш заказ #{result.queue_position} в очереди у курьера
               </div>

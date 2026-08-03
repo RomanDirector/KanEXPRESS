@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import dynamic from 'next/dynamic'
-import { MapPin, Package, Truck, CheckCircle, X } from 'lucide-react'
+import { MapPin, Package, Truck, CheckCircle, RotateCcw, Ban, X } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -22,19 +23,17 @@ interface Order {
   created_at: string
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  pending:    { label: 'Не отгружено', color: 'text-amber-700',  bg: 'bg-amber-50 border-amber-200',  icon: <Package size={14} /> },
-  in_transit: { label: 'В пути',       color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200',    icon: <Truck size={14} /> },
-  delivered:  { label: 'Доставлено',   color: 'text-green-700',  bg: 'bg-green-50 border-green-200',  icon: <CheckCircle size={14} /> },
+const STAGE_ICON: Record<DisplayStage, React.ReactNode> = {
+  not_started: <Package size={14} />,
+  dropped: <Package size={14} />,
+  departed: <Truck size={14} />,
+  arrived: <MapPin size={14} />,
+  delivered: <CheckCircle size={14} />,
+  returned: <RotateCcw size={14} />,
+  cancelled: <Ban size={14} />,
 }
 
-// Курьер мог принять заказ сканом (status = 'in_transit'), но ещё не нажать
-// "Выехал" на своём дашборде (courier_stage остаётся 'not_started') — в этом
-// окне заказ физически лежит у курьера, а не едет к клиенту.
-function getStatusLabel(order: Pick<Order, 'status' | 'courier_stage'>): string {
-  if (order.status === 'in_transit' && order.courier_stage === 'not_started') return 'Отгружено'
-  return STATUS_CONFIG[order.status]?.label ?? order.status
-}
+const ALL_STAGES = Object.keys(STAGE_LABEL) as DisplayStage[]
 
 export default function MapPage() {
   const { t } = useLang()
@@ -78,7 +77,7 @@ export default function MapPage() {
       order_number: o.order_number,
       client_address: o.client_address,
       client_phone: o.client_phone,
-      status: o.status,
+      status: getDisplayStage(o),
       price: o.price,
     }))
 
@@ -95,10 +94,16 @@ export default function MapPage() {
           <p className="text-sm text-gray-400 mt-0.5">{t('mapSub')}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" /> {t('pending')}
-            <span className="w-3 h-3 rounded-full bg-blue-500 inline-block ml-2" /> {t('in_transit')}
-            <span className="w-3 h-3 rounded-full bg-green-500 inline-block ml-2" /> {t('delivered')}
+          <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+            {ALL_STAGES.map((s) => (
+              <span key={s} className="flex items-center gap-1">
+                <span
+                  className="w-3 h-3 rounded-full inline-block"
+                  style={{ backgroundColor: STAGE_MARKER_COLOR[s] }}
+                />
+                {STAGE_LABEL[s]}
+              </span>
+            ))}
           </div>
         </div>
       </header>
@@ -136,13 +141,16 @@ export default function MapPage() {
                 points={mapPoints}
                 height="600px"
                 onPointClick={handlePointClick}
+                statusColors={STAGE_MARKER_COLOR}
               />
             )}
           </div>
 
           {/* Список заказов */}
           <div className="w-72 flex flex-col gap-3 max-h-[600px] overflow-y-auto">
-            {filteredOrders.map(order => (
+            {filteredOrders.map(order => {
+              const stage = getDisplayStage(order)
+              return (
               <div
                 key={order.id}
                 onClick={() => setSelectedOrder(order)}
@@ -154,9 +162,9 @@ export default function MapPage() {
               >
                 <div className="flex items-start justify-between mb-2">
                   <span className="font-mono font-bold text-gray-900 text-sm">{order.order_number}</span>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_CONFIG[order.status]?.bg} ${STATUS_CONFIG[order.status]?.color}`}>
-                    {STATUS_CONFIG[order.status]?.icon}
-                    {getStatusLabel(order)}
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${STAGE_BADGE_CLASS[stage]}`}>
+                    {STAGE_ICON[stage]}
+                    {STAGE_LABEL[stage]}
                   </span>
                 </div>
                 <div className="flex items-start gap-1.5 text-xs text-gray-500">
@@ -173,7 +181,8 @@ export default function MapPage() {
                   <p className="text-xs text-amber-500 mt-1">⚠️ {t('noCoordinates')}</p>
                 )}
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 
@@ -214,9 +223,9 @@ export default function MapPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-500">{t('status')}</span>
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${STATUS_CONFIG[selectedOrder.status]?.bg} ${STATUS_CONFIG[selectedOrder.status]?.color}`}>
-                    {STATUS_CONFIG[selectedOrder.status]?.icon}
-                    {getStatusLabel(selectedOrder)}
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${STAGE_BADGE_CLASS[getDisplayStage(selectedOrder)]}`}>
+                    {STAGE_ICON[getDisplayStage(selectedOrder)]}
+                    {STAGE_LABEL[getDisplayStage(selectedOrder)]}
                   </span>
                 </div>
                 <div className="flex justify-between">

@@ -33,6 +33,7 @@ import {
   RotateCcw,
   Ban,
 } from 'lucide-react'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 
 type Period = 'today' | 'week' | 'month' | 'all'
 type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
@@ -45,6 +46,7 @@ interface Order {
   courier_stage: CourierStage
   courier_fee: number
   seller_id: string | null
+  status: string
   created_at: string
 }
 
@@ -64,13 +66,14 @@ const ALL_SELLERS = 'all'
 const ALL_STAGES = 'all'
 const PAGE_SIZE = 15
 
-const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; className: string }> = {
-  not_started: { label: 'Не начато', icon: Package, className: 'border-gray-200 bg-gray-50 text-gray-600' },
-  departed:    { label: 'Выехал',    icon: Truck,    className: 'border-blue-200 bg-blue-50 text-blue-700' },
-  arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
-  returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
-  cancelled:   { label: 'Отменено',  icon: Ban,       className: 'border-red-200 bg-red-50 text-red-700' },
+const STAGE_ICON: Record<DisplayStage, typeof Package> = {
+  not_started: Package,
+  dropped: Package,
+  departed: Truck,
+  arrived: MapPin,
+  delivered: CheckCircle,
+  returned: RotateCcw,
+  cancelled: Ban,
 }
 
 function isToday(dateString: string) {
@@ -105,7 +108,7 @@ function CourierStatsContent() {
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState<CourierStage | typeof ALL_STAGES>(ALL_STAGES)
+  const [stageFilter, setStageFilter] = useState<DisplayStage | typeof ALL_STAGES>(ALL_STAGES)
   const [page, setPage] = useState(1)
 
   useEffect(() => {
@@ -113,7 +116,7 @@ function CourierStatsContent() {
       setLoading(true)
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, client_address, client_phone, courier_stage, courier_fee, seller_id, created_at')
+        .select('id, order_number, client_address, client_phone, courier_stage, courier_fee, seller_id, status, created_at')
         .eq('courier_name', courier.full_name)
 
       if (error) console.error(error.message)
@@ -177,7 +180,7 @@ function CourierStatsContent() {
   const earned = deliveredOrders.reduce((sum, o) => sum + (o.courier_fee ?? 0), 0)
 
   const tableOrders = scopedOrders
-    .filter((o) => stageFilter === ALL_STAGES || o.courier_stage === stageFilter)
+    .filter((o) => stageFilter === ALL_STAGES || getDisplayStage(o) === stageFilter)
     .filter((o) => {
       const q = search.trim().toLowerCase()
       if (!q) return true
@@ -200,7 +203,7 @@ function CourierStatsContent() {
       'Адрес': o.client_address,
       'Телефон': o.client_phone,
       'Магазин': o.seller_id ? sellerNames[o.seller_id] ?? 'Магазин' : '—',
-      'Статус': STAGE_CONFIG[o.courier_stage].label,
+      'Статус': STAGE_LABEL[getDisplayStage(o)],
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
@@ -305,15 +308,15 @@ function CourierStatsContent() {
                 />
               </div>
 
-              <Select value={stageFilter} onValueChange={(v) => setStageFilter(v as CourierStage | typeof ALL_STAGES)}>
+              <Select value={stageFilter} onValueChange={(v) => setStageFilter(v as DisplayStage | typeof ALL_STAGES)}>
                 <SelectTrigger className="w-56">
                   <SelectValue placeholder="Статус заказа" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_STAGES}>Все статусы</SelectItem>
-                  {(Object.keys(STAGE_CONFIG) as CourierStage[]).map((stage) => (
+                  {(Object.keys(STAGE_LABEL) as DisplayStage[]).map((stage) => (
                     <SelectItem key={stage} value={stage}>
-                      {STAGE_CONFIG[stage].label}
+                      {STAGE_LABEL[stage]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -346,8 +349,8 @@ function CourierStatsContent() {
                   </TableHeader>
                   <TableBody>
                     {paginatedOrders.map((order) => {
-                      const stage = STAGE_CONFIG[order.courier_stage]
-                      const StageIcon = stage.icon
+                      const stage = getDisplayStage(order)
+                      const StageIcon = STAGE_ICON[stage]
                       return (
                         <TableRow key={order.id}>
                           <TableCell className="font-mono font-medium">{order.order_number}</TableCell>
@@ -362,9 +365,9 @@ function CourierStatsContent() {
                             {order.seller_id ? sellerNames[order.seller_id] ?? 'Магазин' : '—'}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`gap-1 ${stage.className}`}>
+                            <Badge variant="outline" className={`gap-1 ${STAGE_BADGE_CLASS[stage]}`}>
                               <StageIcon className="h-3 w-3" />
-                              {stage.label}
+                              {STAGE_LABEL[stage]}
                             </Badge>
                           </TableCell>
                         </TableRow>

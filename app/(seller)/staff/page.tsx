@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Phone, Trash2, Wallet, Users, Link2, X } from 'lucide-react'
+import { Phone, Trash2, Wallet, Users, Link2, X, Warehouse } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 import { useSeller } from '@/lib/seller-context'
 
@@ -51,6 +51,11 @@ export default function StaffPage() {
   const [assignCourierId, setAssignCourierId] = useState('')
   const [assignZoneId, setAssignZoneId] = useState('')
   const [assigning, setAssigning] = useState(false)
+
+  const [warehouseAddress, setWarehouseAddress] = useState('')
+  const [warehouseCoords, setWarehouseCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [savingWarehouse, setSavingWarehouse] = useState(false)
+  const [warehouseSaved, setWarehouseSaved] = useState(false)
 
   // Курьеры, привязанные к зонам текущего продавца — join через courier_zones/zones,
   // а не прямой select('*') из couriers (курьеры общие на всю систему).
@@ -101,15 +106,73 @@ export default function StaffPage() {
     else setSellerZones(data as ZoneOption[])
   }
 
+  const fetchWarehouse = async () => {
+    const { data, error } = await supabase
+      .from('sellers')
+      .select('warehouse_address, warehouse_lat, warehouse_lng')
+      .eq('id', seller.id)
+      .maybeSingle()
+    if (error) {
+      console.error(error.message)
+      return
+    }
+    setWarehouseAddress(data?.warehouse_address || '')
+    setWarehouseCoords(
+      data?.warehouse_lat != null && data?.warehouse_lng != null
+        ? { lat: data.warehouse_lat, lng: data.warehouse_lng }
+        : null,
+    )
+  }
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchCouriers(), fetchAllCouriers(), fetchSellerZones()])
+      await Promise.all([fetchCouriers(), fetchAllCouriers(), fetchSellerZones(), fetchWarehouse()])
       setLoading(false)
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seller.id])
+
+  const saveWarehouseAddress = async () => {
+    const trimmed = warehouseAddress.trim()
+    if (!trimmed) {
+      alert('Укажите адрес склада')
+      return
+    }
+
+    setSavingWarehouse(true)
+    setWarehouseSaved(false)
+
+    const res = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: trimmed }),
+    })
+    const result = await res.json()
+
+    if (!result.success) {
+      setSavingWarehouse(false)
+      alert('Не удалось определить координаты: ' + (result.error || ''))
+      return
+    }
+
+    const { error } = await supabase
+      .from('sellers')
+      .update({ warehouse_address: trimmed, warehouse_lat: result.lat, warehouse_lng: result.lng })
+      .eq('id', seller.id)
+
+    setSavingWarehouse(false)
+
+    if (error) {
+      alert('Ошибка сохранения: ' + error.message)
+      return
+    }
+
+    setWarehouseCoords({ lat: result.lat, lng: result.lng })
+    setWarehouseSaved(true)
+    setTimeout(() => setWarehouseSaved(false), 3000)
+  }
 
   const openAssignModal = () => {
     setAssignCourierId('')
@@ -168,6 +231,35 @@ export default function StaffPage() {
       </header>
 
       <main className="px-8 py-6 max-w-7xl mx-auto">
+
+        {/* Адрес склада */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Warehouse size={16} className="text-gray-400" />
+            <h2 className="text-sm font-bold text-gray-900">Адрес склада</h2>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              value={warehouseAddress}
+              onChange={(e) => setWarehouseAddress(e.target.value)}
+              placeholder="Введите адрес склада"
+              className="flex-1 border rounded-lg px-3 py-2 text-sm"
+            />
+            <button
+              onClick={saveWarehouseAddress}
+              disabled={savingWarehouse}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all shrink-0"
+            >
+              {savingWarehouse ? 'Сохранение...' : 'Сохранить'}
+            </button>
+          </div>
+          {warehouseSaved && (
+            <p className="text-xs text-green-600 font-semibold mt-2">Адрес склада сохранён</p>
+          )}
+          {!warehouseSaved && warehouseCoords && (
+            <p className="text-xs text-gray-400 mt-2">Координаты определены и сохранены</p>
+          )}
+        </div>
 
         {/* Карточки статистики */}
         <div className="grid grid-cols-3 gap-4 mb-6">

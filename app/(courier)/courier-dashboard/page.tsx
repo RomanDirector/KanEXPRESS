@@ -28,6 +28,7 @@ import {
   Store,
   Ban,
 } from 'lucide-react'
+import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 
 type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
 
@@ -46,13 +47,14 @@ interface Order {
   created_at: string
 }
 
-const STAGE_CONFIG: Record<CourierStage, { label: string; icon: typeof Package; className: string }> = {
-  not_started: { label: 'Не начато', icon: Package, className: 'border-gray-200 bg-gray-50 text-gray-600' },
-  departed:    { label: 'Выехал',    icon: Truck,    className: 'border-blue-200 bg-blue-50 text-blue-700' },
-  arrived:     { label: 'На месте',  icon: MapPin,   className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  delivered:   { label: 'Доставлено', icon: CheckCircle, className: 'border-green-200 bg-green-50 text-green-700' },
-  returned:    { label: 'Возврат',   icon: RotateCcw, className: 'border-red-200 bg-red-50 text-red-700' },
-  cancelled:   { label: 'Отменено',  icon: Ban,      className: 'border-red-200 bg-red-50 text-red-700' },
+const STAGE_ICON: Record<DisplayStage, typeof Package> = {
+  not_started: Package,
+  dropped: Package,
+  departed: Truck,
+  arrived: MapPin,
+  delivered: CheckCircle,
+  returned: RotateCcw,
+  cancelled: Ban,
 }
 
 const CANCEL_REASONS: { value: string; label: string }[] = [
@@ -228,9 +230,14 @@ export default function CourierDashboardPage() {
       prev.map((o) => (o.id === orderId ? { ...o, courier_stage: stage } : o)),
     )
 
+    const updates: Record<string, string> = { courier_stage: stage }
+    if (stage !== 'not_started' && stage !== 'cancelled') {
+      updates.status = 'in_transit'
+    }
+
     const { error } = await supabase
       .from('orders')
-      .update({ courier_stage: stage })
+      .update(updates)
       .eq('id', orderId)
 
     if (error) {
@@ -343,8 +350,8 @@ export default function CourierDashboardPage() {
   const shouldGroup = distinctSellerKeys.length > 1
 
   function renderOrderCard(order: Order) {
-    const stage = STAGE_CONFIG[order.courier_stage]
-    const StageIcon = stage.icon
+    const stage = getDisplayStage(order)
+    const StageIcon = STAGE_ICON[stage]
 
     return (
       <Card key={order.id} className="rounded-2xl p-5 space-y-4">
@@ -362,9 +369,9 @@ export default function CourierDashboardPage() {
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            <Badge variant="outline" className={`gap-1 ${stage.className}`}>
+            <Badge variant="outline" className={`gap-1 ${STAGE_BADGE_CLASS[stage]}`}>
               <StageIcon className="h-3 w-3" />
-              {stage.label}
+              {STAGE_LABEL[stage]}
             </Badge>
             <p className="text-lg font-black text-foreground">{order.courier_fee} ₸</p>
           </div>
