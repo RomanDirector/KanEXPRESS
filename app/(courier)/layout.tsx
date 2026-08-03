@@ -77,7 +77,7 @@ export default function CourierLayout({ children }: { children: React.ReactNode 
     <CourierContext.Provider value={courier}>
       <div className="flex min-h-screen bg-secondary">
         {/* Sidebar */}
-        <aside className="w-60 bg-card border-r border-border flex flex-col py-6 px-4 fixed h-full shadow-sm">
+        <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col py-6 px-4 fixed h-full shadow-sm">
 
           <div className="mb-8 px-2">
             <span className="text-2xl font-black tracking-tight">
@@ -125,9 +125,29 @@ export default function CourierLayout({ children }: { children: React.ReactNode 
           </div>
         </aside>
 
-        <main className="ml-60 flex-1 min-h-screen">
+        <main className="md:ml-60 flex-1 min-h-screen pb-16 md:pb-0">
           {children}
         </main>
+
+        {/* Нижнее меню — видно только на мобильном, дублирует sidebar */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border flex justify-around py-2 z-50">
+          {navItems.map((item) => {
+            const Icon = item.icon
+            const isActive = pathname === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] font-medium ${
+                  isActive ? 'text-primary' : 'text-muted-foreground'
+                }`}
+              >
+                <Icon size={20} />
+                {item.label}
+              </Link>
+            )
+          })}
+        </nav>
       </div>
     </CourierContext.Provider>
   )
