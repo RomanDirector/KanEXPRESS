@@ -1,28 +1,23 @@
-В app/(courier)/layout.tsx:
+Выполни поиск по всему проекту:
 
-1. Сделай <aside> (боковое меню) скрытым на мобильном и видимым от md:
-   className: "hidden md:flex w-60 ... fixed h-full ..."
+grep -rn "wa.me" --include="*.tsx" --include="*.ts" .
 
-2. Добавь нижнее меню, видимое ТОЛЬКО на мобильном (md:hidden), 
-   fixed снизу, с теми же 6 пунктами (иконка + маленький текст), 
-   например:
+Замени ВСЕ найденные номера в wa.me-ссылках (в любом формате: 
+wa.me/77..., wa.me/7-700-..., encoded и т.д.) на правильный номер: 
+77767286272
 
-   <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border 
-     flex justify-around py-2 z-50">
-     {navItems.map((item) => {
-       const Icon = item.icon
-       const isActive = pathname === item.href
-       return (
-         <Link key={item.href} href={item.href} 
-           className={`flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] font-medium 
-             ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-           <Icon size={20} />
-           {item.label}
-         </Link>
-       )
-     })}
-   </nav>
+Обрати особое внимание на:
+- components/sections/hero*.tsx (или где лежит секция с кнопкой 
+  "Написать в WhatsApp" на главной — это тот файл, что дал баг на скриншоте)
+- app/page.tsx
+- app/(marketing)/tariffs/page.tsx
+- app/contacts/page.tsx
+- lib/whatsapp-templates.ts или lib/whatsapp.ts, если там есть 
+  дефолтный/константный номер (например const WHATSAPP_NUMBER = "...")
 
-3. У <main> убери фиксированный ml-60 на мобильном, оставь только от md:
-   className: "md:ml-60 flex-1 min-h-screen pb-16 md:pb-0"
-   (pb-16 — отступ снизу под нижнее меню, чтобы контент не перекрывался)
+Если номер вынесен в отдельную константу (например lib/constants.ts, 
+WHATSAPP_NUMBER), поменяй его там один раз — это самый надёжный вариант, 
+чтобы больше не было рассинхрона между кнопками.
+
+После замены пришли список всех файлов, где был найден wa.me, 
+и итоговое значение номера в каждом.

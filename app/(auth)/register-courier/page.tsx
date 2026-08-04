@@ -120,7 +120,7 @@ export default function RegisterCourierPage() {
       <Navbar />
 
       <main className="mx-auto max-w-6xl px-6 pt-28 pb-16">
-        <div className="flex gap-8 items-start">
+        <div className="flex flex-col lg:flex-row gap-8 items-start">
 
           {/* Левая колонка — форма */}
           <div className="flex-1 bg-white rounded-2xl shadow-sm p-8">
@@ -186,7 +186,7 @@ export default function RegisterCourierPage() {
           </div>
 
           {/* Правая колонка — тёмная sticky карточка */}
-          <div className="w-80 shrink-0 bg-[#0a0a0a] rounded-2xl p-8 sticky top-24 text-white">
+          <div className="w-full lg:w-80 lg:shrink-0 bg-[#0a0a0a] rounded-2xl p-8 lg:sticky lg:top-24 text-white">
             <h2 className="text-lg font-light tracking-tight">Как работает доставка</h2>
             <div className="mt-6 space-y-5">
               {[
