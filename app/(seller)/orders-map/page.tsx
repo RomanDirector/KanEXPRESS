@@ -131,7 +131,7 @@ export default function MapPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link
             href="/dashboard"
@@ -158,7 +158,7 @@ export default function MapPage() {
         </div>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {/* Фильтр статусов */}
         <div className="flex items-center gap-2 mb-4">
           {['all', 'pending', 'in_transit', 'delivered'].map(s => (
@@ -188,27 +188,29 @@ export default function MapPage() {
           )}
         </div>
 
-        <div className="flex gap-6">
+        <div className="flex flex-col md:flex-row gap-6">
           {/* Карта */}
-          <div className="flex-1">
+          <div className="flex-1 w-full">
             {loading ? (
-              <div className="bg-white rounded-2xl border border-gray-100 flex items-center justify-center" style={{ height: '600px' }}>
+              <div className="bg-white rounded-2xl border border-gray-100 flex items-center justify-center h-[60vh] md:h-[600px]">
                 <p className="text-gray-400 text-sm">{t('loading')}</p>
               </div>
             ) : (
-              <MapGL
-                points={mapPoints}
-                height="600px"
-                selectedId={selectedOrder?.id ?? null}
-                onPointClick={handlePointClick}
-                onBackgroundClick={() => setSelectedOrder(null)}
-                statusColors={STAGE_MARKER_COLOR}
-              />
+              <div className="h-[60vh] md:h-[600px]">
+                <MapGL
+                  points={mapPoints}
+                  height="100%"
+                  selectedId={selectedOrder?.id ?? null}
+                  onPointClick={handlePointClick}
+                  onBackgroundClick={() => setSelectedOrder(null)}
+                  statusColors={STAGE_MARKER_COLOR}
+                />
+              </div>
             )}
           </div>
 
           {/* Список заказов */}
-          <div className="w-72 flex flex-col gap-3 max-h-[600px] overflow-y-auto">
+          <div className="w-full md:w-72 flex flex-col gap-3 max-h-[400px] md:max-h-[600px] overflow-y-auto">
             {filteredOrders.map(order => {
               const stage = getDisplayStage(order)
               return (
@@ -254,7 +256,7 @@ export default function MapPage() {
             onClick={() => setSelectedOrder(null)}
           >
             <div
-              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md"
+              className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-4">

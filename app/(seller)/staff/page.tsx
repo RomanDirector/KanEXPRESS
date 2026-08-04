@@ -253,12 +253,12 @@ export default function StaffPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5">
         <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('staff')}</h1>
         <p className="text-sm text-gray-400 mt-0.5">Курьеры</p>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
 
         {/* Адрес склада */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm mb-6">
@@ -341,6 +341,7 @@ export default function StaffPage() {
 
           /* ===== ТАБЛИЦА КУРЬЕРОВ ===== */
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -424,6 +425,7 @@ export default function StaffPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
           </>
@@ -436,7 +438,7 @@ export default function StaffPage() {
           onClick={() => setShowAssignModal(false)}
         >
           <div
-            className="bg-white rounded-2xl p-6 w-[440px] max-w-[90vw] shadow-2xl"
+            className="bg-white rounded-2xl p-6 w-[440px] max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold text-lg mb-4">Привязать курьера к зоне</h3>

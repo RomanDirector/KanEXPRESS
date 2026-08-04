@@ -60,7 +60,10 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       )
     }
-    queuePosition = count ?? 0
+    // +1: count — это число заказов перед этим, а фронт показывает
+    // "Ваш заказ #{position}" как позицию/ранг в очереди (1 = следующий),
+    // а не количество заказов впереди.
+    queuePosition = (count ?? 0) + 1
   }
 
   return NextResponse.json({

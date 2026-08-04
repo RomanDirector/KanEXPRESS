@@ -13,6 +13,13 @@ export const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+// Общий обработчик выхода — используется и десктопным сайдбаром, и мобильной
+// кнопкой выхода на страницах профиля, чтобы не дублировать логику signOut.
+export async function signOutAndRedirect() {
+  await supabase.auth.signOut()
+  window.location.href = '/login'
+}
+
 // Используется только сразу после signUp(), когда data.session уже пришёл
 // непустым — на случай гонки между resolve() промиса и фактической записью
 // токена в клиент. НЕ подходит для ожидания сессии, которая появится после

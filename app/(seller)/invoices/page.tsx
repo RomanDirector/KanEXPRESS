@@ -211,7 +211,7 @@ export default function InvoicesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('invoices')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">PDF + QR + Штрихкод</p>
@@ -230,11 +230,12 @@ export default function InvoicesPage() {
         </button>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -311,6 +312,7 @@ export default function InvoicesPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </main>

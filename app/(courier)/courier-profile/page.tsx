@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createClient, signOutAndRedirect } from '@/lib/supabase'
 import { useCourier } from '@/lib/courier-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Store, Wallet, TrendingUp, CheckCircle, Package, Truck, MapPin, RotateCcw, Banknote, Ban } from 'lucide-react'
+import { Store, Wallet, TrendingUp, CheckCircle, Package, Truck, MapPin, RotateCcw, Banknote, Ban, LogOut } from 'lucide-react'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 
 type CourierStage = 'not_started' | 'departed' | 'arrived' | 'delivered' | 'returned' | 'cancelled'
@@ -58,6 +58,7 @@ export default function CourierProfilePage() {
   const [sellerNames, setSellerNames] = useState<Record<string, string>>({})
   const [sellerNamesLoading, setSellerNamesLoading] = useState(false)
   const [zoneOrganizations, setZoneOrganizations] = useState<{ id: string; label: string }[]>([])
+  const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -222,6 +223,23 @@ export default function CourierProfilePage() {
     .filter((s) => s.debt > 0)
     .sort((a, b) => b.debt - a.debt)
 
+  // Чипы магазинов — объединение привязок по зонам доставки и магазинов,
+  // от которых уже были заказы, чтобы ни один магазин не терялся из списка.
+  const chipMap = new Map<string, string>()
+  zoneOrganizations.forEach((org) => chipMap.set(org.id, org.label))
+  sellerSummaries.forEach((s) => {
+    if (!chipMap.has(s.sellerId)) chipMap.set(s.sellerId, s.name ?? 'Нет данных')
+  })
+  const chipList = Array.from(chipMap.entries()).map(([id, label]) => ({ id, label }))
+
+  // Клик по чипу выбирает активный магазин для карточки деталей выше.
+  // По умолчанию выбираем первый магазин, как только список загрузится.
+  useEffect(() => {
+    if (selectedSellerId === null && chipList.length > 0) {
+      setSelectedSellerId(chipList[0].id)
+    }
+  }, [chipList, selectedSellerId])
+
   const historyOrders = orders.slice(0, HISTORY_LIMIT)
 
   return (
@@ -324,48 +342,76 @@ export default function CourierProfilePage() {
                 <h3 className="font-semibold">Работаю с магазинами</h3>
               </div>
 
-              {zoneOrganizations.length > 0 && (
+              {chipList.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {zoneOrganizations.map((org) => (
-                    <Badge key={org.id} variant="outline" className="gap-1.5 py-1.5 px-3">
-                      <Store className="h-3 w-3" />
-                      {org.label}
-                    </Badge>
-                  ))}
+                  {chipList.map((chip) => {
+                    const isActive = chip.id === selectedSellerId
+                    return (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        onClick={() => setSelectedSellerId(chip.id)}
+                        aria-pressed={isActive}
+                      >
+                        <Badge
+                          variant={isActive ? 'default' : 'outline'}
+                          className={`gap-1.5 py-1.5 px-3 cursor-pointer transition-colors ${
+                            isActive ? '' : 'hover:bg-accent'
+                          }`}
+                        >
+                          <Store className="h-3 w-3" />
+                          {chip.label}
+                        </Badge>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
 
-              {sellerSummaries.length === 0 ? (
-                zoneOrganizations.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Пока нет заказов, привязанных к магазину</p>
-                )
+              {chipList.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Пока нет заказов, привязанных к магазину</p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {sellerSummaries.map((s) => (
-                    <Card key={s.sellerId} className="rounded-2xl p-5 space-y-3">
+                (() => {
+                  const selected = sellerSummaries.find((s) => s.sellerId === selectedSellerId)
+                  const selectedChip = chipList.find((chip) => chip.id === selectedSellerId)
+
+                  if (!selected) {
+                    return selectedChip ? (
+                      <Card className="rounded-2xl p-5 space-y-3 max-w-sm">
+                        <div className="flex items-center gap-2">
+                          <Store className="h-4 w-4 text-muted-foreground" />
+                          <p className="font-semibold text-foreground truncate">{selectedChip.label}</p>
+                        </div>
+                        <p className="text-sm text-muted-foreground">Пока нет доставленных заказов от этого магазина</p>
+                      </Card>
+                    ) : null
+                  }
+
+                  return (
+                    <Card className="rounded-2xl p-5 space-y-3 max-w-sm">
                       <div className="flex items-center gap-2">
                         <Store className="h-4 w-4 text-muted-foreground" />
                         {sellerNamesLoading ? (
                           <Skeleton className="h-4 w-28" />
                         ) : (
-                          <p className="font-semibold text-foreground truncate">{s.name ?? 'Нет данных'}</p>
+                          <p className="font-semibold text-foreground truncate">{selected.name ?? 'Нет данных'}</p>
                         )}
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Доставлено</span>
-                        <span className="font-bold text-foreground">{s.deliveredCount}</span>
+                        <span className="font-bold text-foreground">{selected.deliveredCount}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Заработано</span>
-                        <span className="font-bold text-primary">{s.earned} ₸</span>
+                        <span className="font-bold text-primary">{selected.earned} ₸</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">Последний заказ</span>
-                        <span className="font-medium text-foreground">{formatDate(s.lastOrderDate)}</span>
+                        <span className="font-medium text-foreground">{formatDate(selected.lastOrderDate)}</span>
                       </div>
                     </Card>
-                  ))}
-                </div>
+                  )
+                })()
               )}
             </div>
 
@@ -420,6 +466,16 @@ export default function CourierProfilePage() {
                 </Card>
               )}
             </div>
+
+            {/* Кнопка выхода — на десктопе она уже есть в сайдбаре, здесь только для мобильного */}
+            <button
+              type="button"
+              onClick={() => signOutAndRedirect()}
+              className="md:hidden flex w-full items-center justify-center gap-2 px-4 py-3.5 rounded-xl border border-destructive/30 text-destructive text-sm font-semibold hover:bg-destructive/5 transition-all min-h-11"
+            >
+              <LogOut size={18} />
+              Выйти из аккаунта
+            </button>
           </>
         )}
       </main>

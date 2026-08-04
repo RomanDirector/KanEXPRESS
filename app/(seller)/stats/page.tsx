@@ -94,7 +94,7 @@ export default function StatsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('stats')} & {t('finance')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">{t('financeSub')}</p>
@@ -116,7 +116,7 @@ export default function StatsPage() {
         </div>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">{t('loading')}</div>
         ) : (

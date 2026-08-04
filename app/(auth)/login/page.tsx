@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,24 @@ import { supabase } from '@/lib/supabase'
 import { getPendingRegistration, clearPendingRegistration } from '@/lib/pending-registration'
 import { ensureProfileExists } from '@/lib/ensure-profile'
 import { useLang } from '@/lib/i18n'
+import { Spinner } from '@/components/ui/spinner'
+
+// Общая для handleSubmit и проверки уже активной сессии на маунте —
+// приоритет admin > courier > seller (см. комментарий у handleSubmit).
+async function resolveRoleDashboardPath(
+  userId: string,
+): Promise<'/admin' | '/courier-dashboard' | '/dashboard' | null> {
+  const { data: admin } = await supabase.from('admins').select('id').eq('id', userId).maybeSingle()
+  if (admin) return '/admin'
+
+  const { data: courier } = await supabase.from('couriers').select('id').eq('id', userId).maybeSingle()
+  if (courier) return '/courier-dashboard'
+
+  const { data: seller } = await supabase.from('sellers').select('id').eq('id', userId).maybeSingle()
+  if (seller) return '/dashboard'
+
+  return null
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -19,6 +37,41 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+
+  // Если пользователь уже залогинен (сессия Supabase сохранилась, например
+  // после возврата системной кнопкой "Назад"), сразу отправляем его в кабинет
+  // вместо показа формы входа.
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkExistingSession() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        if (!cancelled) setCheckingSession(false)
+        return
+      }
+
+      const dashboardPath = await resolveRoleDashboardPath(user.id)
+      if (cancelled) return
+
+      if (dashboardPath) {
+        router.replace(dashboardPath)
+        return
+      }
+
+      setCheckingSession(false)
+    }
+
+    checkExistingSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [router])
 
   const [forgotOpen, setForgotOpen] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
@@ -65,36 +118,10 @@ export default function LoginPage() {
 
     // admins проверяется первой: если id случайно есть в нескольких таблицах
     // одновременно, приоритет всегда у admin.
-    const { data: admin } = await supabase
-      .from('admins')
-      .select('id')
-      .eq('id', userId)
-      .maybeSingle()
+    const dashboardPath = await resolveRoleDashboardPath(userId)
 
-    if (admin) {
-      router.push('/admin')
-      return
-    }
-
-    const { data: courier } = await supabase
-      .from('couriers')
-      .select('id')
-      .eq('id', userId)
-      .maybeSingle()
-
-    if (courier) {
-      router.push('/courier-dashboard')
-      return
-    }
-
-    const { data: seller } = await supabase
-      .from('sellers')
-      .select('id')
-      .eq('id', userId)
-      .maybeSingle()
-
-    if (seller) {
-      router.push('/dashboard')
+    if (dashboardPath) {
+      router.push(dashboardPath)
       return
     }
 
@@ -123,6 +150,14 @@ export default function LoginPage() {
 
     setLoading(false)
     router.push(pending.data.role === 'courier' ? '/courier-dashboard' : '/dashboard')
+  }
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-[#f8f8f8] flex items-center justify-center">
+        <Spinner className="size-6 text-gray-400" />
+      </div>
+    )
   }
 
   return (

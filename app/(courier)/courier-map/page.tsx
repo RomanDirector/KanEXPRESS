@@ -203,8 +203,8 @@ export default function CourierMapPage() {
         {loading ? (
           <div className="text-center py-20 text-muted-foreground">Загружаем заказы...</div>
         ) : (
-          <div className="flex gap-6 items-start">
-            <div className="w-96 shrink-0 space-y-3">
+          <div className="flex flex-col md:flex-row gap-6 items-start">
+            <div className="w-full md:w-96 md:shrink-0 space-y-3">
               {filteredOrders.length === 0 ? (
                 <div className="text-center py-16 text-muted-foreground">Заказов нет</div>
               ) : (
@@ -273,13 +273,13 @@ export default function CourierMapPage() {
               )}
             </div>
 
-            <div className="flex-1 space-y-3">
-              <div className="relative">
+            <div className="flex-1 w-full space-y-3">
+              <div className="relative h-[60vh] md:h-[600px]">
                 <MapGL
                   points={points}
                   zones={zones}
                   warehouses={warehouses}
-                  height="600px"
+                  height="100%"
                   statusColors={STAGE_MARKER_COLOR}
                   selectedId={selectedId}
                   onPointClick={(point) => setSelectedId(point.id)}

@@ -300,7 +300,7 @@ export default function ArchivePage() {
           onClick={() => setPhotoOrder(null)}
         >
           <div
-            className="relative bg-white rounded-xl p-6 w-96 shadow-2xl"
+            className="relative bg-white rounded-xl p-6 w-96 max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <button

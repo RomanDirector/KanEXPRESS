@@ -82,7 +82,7 @@ export default function DeliveryZonesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 md:px-6 py-4 border-b bg-white">
         <div>
           <Link
             href="/dashboard"

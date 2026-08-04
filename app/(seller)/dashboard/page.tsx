@@ -374,7 +374,7 @@ export default function SellerDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">{t('dashboard')}</h1>
           <p className="text-sm text-gray-400 mt-0.5">{t('dashboardSub')}</p>
@@ -412,7 +412,7 @@ export default function SellerDashboard() {
         </div>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {/* Карточки статистики */}
         <div className="grid grid-cols-3 gap-5 mb-6">
           {STAT_CARDS.map(({ key, icon: Icon, color, border, iconBg }) => (
@@ -639,7 +639,7 @@ export default function SellerDashboard() {
           onClick={() => setPhotoOrder(null)}
         >
           <div
-            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            className="bg-white rounded-2xl p-6 w-96 max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-3">{t('packagingPhotoTitle').replace('{number}', photoOrder.order_number)}</h3>

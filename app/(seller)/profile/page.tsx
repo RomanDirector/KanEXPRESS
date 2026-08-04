@@ -896,7 +896,7 @@ export default function ProfilePage() {
           }}
         >
           <div
-            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            className="bg-white rounded-2xl p-6 w-96 max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-2 text-gray-900">{t('deleteAccountBtn')}</h3>
@@ -939,7 +939,7 @@ export default function ProfilePage() {
           }}
         >
           <div
-            className="bg-white rounded-2xl p-6 w-96 shadow-2xl"
+            className="bg-white rounded-2xl p-6 w-96 max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-2 text-gray-900">{t('upgradeModalTitle')}</h3>

@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 
 export type Lang = 'ru' | 'kz'
 
@@ -959,8 +959,26 @@ const LangContext = createContext<{
   t: (key) => key,
 })
 
+const LANG_STORAGE_KEY = 'kanexpress_lang'
+
 export function LangProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLang] = useState<Lang>('ru')
+  // Стартуем всегда с 'ru', чтобы серверный и первый клиентский рендер
+  // совпадали (доступ к localStorage — только в useEffect, не при инициализации
+  // состояния, иначе будет hydration mismatch). Сохранённый язык подхватываем
+  // сразу после маунта — без этого выбор казахского сбрасывался при каждом
+  // новом рендере/переходе на страницу.
+  const [lang, setLangState] = useState<Lang>('ru')
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LANG_STORAGE_KEY)
+    if (saved === 'ru' || saved === 'kz') setLangState(saved)
+  }, [])
+
+  const setLang = (l: Lang) => {
+    setLangState(l)
+    localStorage.setItem(LANG_STORAGE_KEY, l)
+  }
+
   const t = (key: TranslationKey) => translations[lang][key] || key
   return (
     <LangContext.Provider value={{ lang, setLang, t }}>

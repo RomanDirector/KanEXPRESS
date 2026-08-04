@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, Map, BarChart2, User, LogOut, Ban, ScanLine } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { supabase, signOutAndRedirect } from '@/lib/supabase'
 import { CourierContext, type CourierProfile } from '@/lib/courier-context'
 import { Spinner } from '@/components/ui/spinner'
 
@@ -61,8 +61,7 @@ export default function CourierLayout({ children }: { children: React.ReactNode 
   }, [router])
 
   async function handleLogout() {
-    await supabase.auth.signOut()
-    router.push('/login')
+    await signOutAndRedirect()
   }
 
   if (checking || !courier) {

@@ -441,7 +441,7 @@ export default function CourierDashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="bg-card border-b border-border px-6 py-4 flex items-center justify-between">
+      <header className="bg-card border-b border-border px-4 md:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-foreground">Мои заказы</h2>
           <p className="text-sm text-muted-foreground mt-0.5">{courier.full_name}</p>

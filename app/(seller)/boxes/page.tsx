@@ -267,7 +267,7 @@ export default function BoxesPage() {
           onClick={() => setQrBox(null)}
         >
           <div
-            className="relative bg-white rounded-xl p-6 w-[360px] shadow-2xl flex flex-col items-center"
+            className="relative bg-white rounded-xl p-6 w-[360px] max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col items-center"
             onClick={(e) => e.stopPropagation()}
           >
             <button

@@ -951,7 +951,7 @@ export default function DempingPage() {
           onClick={() => setShowCronInfo(false)}
         >
           <div
-            className="bg-white rounded-xl p-6 w-[560px] max-w-[90vw] shadow-2xl"
+            className="bg-white rounded-xl p-6 w-[560px] max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="font-bold mb-3">{t('dempingCronBtn')}</h3>

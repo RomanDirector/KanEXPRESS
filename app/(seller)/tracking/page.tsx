@@ -68,7 +68,7 @@ export default function TrackingPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-100 px-8 py-5 flex items-center justify-between">
+      <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link
             href="/dashboard"
@@ -86,7 +86,7 @@ export default function TrackingPage() {
         </div>
       </header>
 
-      <main className="px-8 py-6 max-w-7xl mx-auto">
+      <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {!loading && couriers.length === 0 && (
           <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4 text-center shadow-sm">
             <p className="text-sm text-gray-500 mb-3">{t('trackingNoCouriersMsg')}</p>
@@ -111,6 +111,7 @@ export default function TrackingPage() {
                   <span className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold">{t('inTransitCount').replace('{count}', String(c.orders.length))}</span>
                 </div>
                 {c.orders.length > 0 && (
+                  <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="text-left text-gray-400 text-xs uppercase"><th className="py-1 pr-4">#</th><th className="py-1">{t('address')}</th></tr></thead>
                     <tbody>
@@ -122,6 +123,7 @@ export default function TrackingPage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             ))}
