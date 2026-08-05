@@ -1,4 +1,4 @@
-import 'server-only'
+
 
 const KASPI_API_BASE = process.env.KASPI_API_BASE || 'https://kaspi.kz/shop/api/v2'
 
