@@ -974,6 +974,14 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     if (saved === 'ru' || saved === 'kz') setLangState(saved)
   }, [])
 
+  // Chrome предлагает автоперевод, если html[lang] не совпадает с реальным
+  // языком контента (или отсутствует) — из-за этого интерфейс на русском
+  // ломался автопереводом ("Карта" → "много" и т.п.). lang="kz" в BCP47 не
+  // существует (это код страны, а не языка) — казахскому языку соответствует "kk".
+  useEffect(() => {
+    document.documentElement.lang = lang === 'kz' ? 'kk' : 'ru'
+  }, [lang])
+
   const setLang = (l: Lang) => {
     setLangState(l)
     localStorage.setItem(LANG_STORAGE_KEY, l)

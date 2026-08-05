@@ -16,6 +16,23 @@ export function isValidKaspiToken(token: string | null | undefined): token is st
   return !STUB_TOKENS.has(token.trim().toLowerCase())
 }
 
+// Вытаскивает человекочитаемую часть из тела ошибки Kaspi (обычно JSON:API
+// { errors: [{ detail/title }] }) — для показа продавцу. Полное тело всегда
+// уходит в console.error отдельно, здесь — только текст сообщения, без токена
+// (тело ответа Kaspi токен не содержит).
+function extractKaspiErrorMessage(bodyText: string): string | null {
+  if (!bodyText) return null
+  try {
+    const parsed = JSON.parse(bodyText)
+    const first = parsed?.errors?.[0]
+    const detail = first?.detail || first?.title || parsed?.message || parsed?.error
+    if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  } catch {
+    // тело не JSON — детали не показываем пользователю, но оно уже в логах
+  }
+  return null
+}
+
 export interface KaspiOrder {
   id: string
   code: string
@@ -57,7 +74,10 @@ export async function fetchKaspiOrders({
     })
 
     if (!res.ok) {
-      throw new Error(`Kaspi API ответил ${res.status} (магазин ${shopId || '—'})`)
+      const bodyText = await res.text().catch(() => '')
+      console.error(`[kaspi] заказы: ответ ${res.status} (магазин ${shopId || '—'}): ${bodyText}`)
+      const detail = extractKaspiErrorMessage(bodyText)
+      throw new Error(`Kaspi API ответил ${res.status} (магазин ${shopId || '—'})${detail ? `: ${detail}` : ''}`)
     }
 
     const json = (await res.json()) as KaspiOrdersResponse
