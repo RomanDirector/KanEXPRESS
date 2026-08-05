@@ -1,14 +1,6 @@
-
-
 const KASPI_API_BASE = process.env.KASPI_API_BASE || 'https://kaspi.kz/shop/api/v2'
-
-// Ограничитель пагинации — предохранитель от бесконечного цикла, если Kaspi
-// вернёт некорректный meta.pageCount.
 const MAX_PAGES = 50
 const PAGE_SIZE = 100
-
-// Значения, которые продавец мог оставить в форме регистрации вместо реального
-// токена (пустое поле, тестовые данные) — с такими к Kaspi API не ходим.
 const STUB_TOKENS = new Set(['', 'test', 'demo', 'stub', 'xxx', '-'])
 
 export function isValidKaspiToken(token: string | null | undefined): token is string {
@@ -16,10 +8,6 @@ export function isValidKaspiToken(token: string | null | undefined): token is st
   return !STUB_TOKENS.has(token.trim().toLowerCase())
 }
 
-// Вытаскивает человекочитаемую часть из тела ошибки Kaspi (обычно JSON:API
-// { errors: [{ detail/title }] }) — для показа продавцу. Полное тело всегда
-// уходит в console.error отдельно, здесь — только текст сообщения, без токена
-// (тело ответа Kaspi токен не содержит).
 function extractKaspiErrorMessage(bodyText: string): string | null {
   if (!bodyText) return null
   try {
@@ -28,7 +16,6 @@ function extractKaspiErrorMessage(bodyText: string): string | null {
     const detail = first?.detail || first?.title || parsed?.message || parsed?.error
     if (typeof detail === 'string' && detail.trim()) return detail.trim()
   } catch {
-    // тело не JSON — детали не показываем пользователю, но оно уже в логах
   }
   return null
 }
@@ -47,9 +34,6 @@ interface KaspiOrdersResponse {
   meta?: { pageCount?: number }
 }
 
-// Поля в attributes соответствуют публичному Kaspi Merchant API v2 (JSON:API).
-// Перед использованием в проде сверь названия полей с реальным ответом для
-// конкретного магазина — Kaspi иногда меняет форму ответа между версиями.
 export async function fetchKaspiOrders({
   token,
   shopId,
@@ -58,7 +42,6 @@ export async function fetchKaspiOrders({
   shopId: string
 }): Promise<KaspiOrder[]> {
   const orders: KaspiOrder[] = []
-
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
     const url = new URL(`${KASPI_API_BASE}/orders`)
     url.searchParams.set('page[number]', String(pageNumber))
@@ -75,28 +58,21 @@ export async function fetchKaspiOrders({
       },
       cache: 'no-store',
     })
-
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '')
       console.error(`[kaspi] заказы: ответ ${res.status} (магазин ${shopId || '—'}): ${bodyText}`)
       const detail = extractKaspiErrorMessage(bodyText)
       throw new Error(`Kaspi API ответил ${res.status} (магазин ${shopId || '—'})${detail ? `: ${detail}` : ''}`)
     }
-
     const json = (await res.json()) as KaspiOrdersResponse
     const pageOrders = json.data.map((item) => ({ id: item.id, ...item.attributes }))
     orders.push(...pageOrders)
-
     const pageCount = json.meta?.pageCount ?? 1
     if (pageOrders.length === 0 || pageNumber + 1 >= pageCount) break
   }
-
   return orders
 }
 
-// Один "сырой" запрос без маппинга и пагинации — только для ручной сверки
-// реальных названий полей ответа. Используется временным debug-роутом
-// app/api/kaspi/debug/route.ts.
 export async function fetchKaspiOrdersRaw({
   token,
   shopId,
@@ -104,8 +80,7 @@ export async function fetchKaspiOrdersRaw({
   token: string
   shopId: string
 }): Promise<unknown> {
-const url = new URL(`${KASPI_API_BASE}/orders`)
-const url = new URL(`${KASPI_API_BASE}/orders`)
+  const url = new URL(`${KASPI_API_BASE}/orders`)
   url.searchParams.set('page[number]', '0')
   url.searchParams.set('page[size]', '5')
   if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
@@ -116,20 +91,13 @@ const url = new URL(`${KASPI_API_BASE}/orders`)
     },
     cache: 'no-store',
   })
-
   const body = await res.json().catch(() => null)
-
   if (!res.ok) {
     throw new Error(`Kaspi API ответил ${res.status}: ${JSON.stringify(body)}`)
   }
-
   return body
 }
 
-// Статусы заказа в Kaspi заметно детальнее наших — сводим к трём стадиям,
-// которые понимает остальной код (курьерский дашборд, статистика и т.д.).
-// Незнакомое/новое состояние Kaspi безопаснее оставлять как 'pending', чем
-// угадывать — иначе такой заказ может выпасть из отображения.
 const STATUS_MAP: Record<string, string> = {
   ACCEPTED_BY_MERCHANT: 'pending',
   ASSEMBLE: 'pending',
@@ -156,9 +124,6 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
   }
 }
 
-// Двухшаговое подтверждение выдачи заказа курьером через Kaspi API: сначала
-// запрашиваем отправку кода клиенту (X-Send-Code: true без кода), затем
-// подтверждаем введённый курьером код (X-Security-Code).
 export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
   token: string; kaspiOrderId: string; orderCode: string
 }): Promise<void> {
@@ -204,14 +169,6 @@ export async function confirmDeliveryCode({ token, kaspiOrderId, orderCode, secu
   return { status }
 }
 
-// --- Публикация цен через Kaspi Merchant API ---
-//
-// Мультитенантно, как fetchKaspiOrders выше: токен и shopId каждого продавца берутся
-// из sellers.kaspi_token/kaspi_shop_id и передаются параметрами, а не через общий env.
-
-// ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: пути ниже — предположение по аналогии с /orders (JSON:API,
-// PATCH ресурса товара). Реальные эндпоинты и формат тела запроса для обновления цены нужно
-// сверить с документацией Kaspi Merchant API перед использованием в проде.
 const KASPI_PRICE_ENDPOINTS = {
   product: (sku: string) => `/products/${encodeURIComponent(sku)}`,
 }
@@ -220,28 +177,22 @@ async function kaspiFetch(token: string, path: string, init: RequestInit = {}): 
   const res = await fetch(`${KASPI_API_BASE}${path}`, {
     ...init,
     headers: {
-      // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: заголовок авторизации может быть
-      // Authorization: Bearer <token> вместо X-Auth-Token — сверить с реальным API.
       'X-Auth-Token': token,
       'Content-Type': 'application/vnd.api+json',
       ...(init.headers as Record<string, string> | undefined),
     },
     cache: 'no-store',
   })
-
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`Kaspi API ответил ${res.status}: ${body}`)
   }
-
   return res
 }
 
 export async function updateProductPrice({ token, shopId, sku, price }: {
   token: string; shopId?: string; sku: string; price: number
 }): Promise<void> {
-  // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: метод (PATCH) и форма тела запроса — предположение
-  // по JSON:API конвенции, сверить с реальным Merchant API перед продом.
   await kaspiFetch(token, KASPI_PRICE_ENDPOINTS.product(sku), {
     method: 'PATCH',
     body: JSON.stringify({
@@ -257,7 +208,6 @@ export async function updateProductPrice({ token, shopId, sku, price }: {
 export async function getProductPrice({ token, sku }: { token: string; sku: string }): Promise<number> {
   const res = await kaspiFetch(token, KASPI_PRICE_ENDPOINTS.product(sku), { method: 'GET' })
   const json = (await res.json()) as { data?: { attributes?: { price?: number } } }
-  // ПРОВЕРИТЬ ПО ДОКУМЕНТАЦИИ KASPI: путь до цены в ответе (data.attributes.price) — предположение.
   const price = json.data?.attributes?.price
   if (typeof price !== 'number') {
     throw new Error('Kaspi API вернул ответ без цены товара')
