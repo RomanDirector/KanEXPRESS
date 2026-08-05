@@ -48,8 +48,8 @@ export async function fetchKaspiOrders({
     url.searchParams.set('page[size]', String(PAGE_SIZE))
     if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
     const now = Date.now()
-    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000
-    url.searchParams.set('filter[orders][creationDate][$ge]', String(now - fourteenDaysMs))
+    const lookbackMs = 2 * 24 * 60 * 60 * 1000
+    url.searchParams.set('filter[orders][creationDate][$ge]', String(now - lookbackMs))
     url.searchParams.set('filter[orders][creationDate][$le]', String(now))
     const res = await fetch(url.toString(), {
       headers: {
@@ -57,6 +57,7 @@ export async function fetchKaspiOrders({
         'Content-Type': 'application/vnd.api+json',
       },
       cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) {
       const bodyText = await res.text().catch(() => '')
