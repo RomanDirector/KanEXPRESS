@@ -64,7 +64,10 @@ export async function fetchKaspiOrders({
     url.searchParams.set('page[number]', String(pageNumber))
     url.searchParams.set('page[size]', String(PAGE_SIZE))
     if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
-
+    const now = Date.now()
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000
+    url.searchParams.set('filter[orders][creationDate][$ge]', String(now - fourteenDaysMs))
+    url.searchParams.set('filter[orders][creationDate][$le]', String(now))
     const res = await fetch(url.toString(), {
       headers: {
         'X-Auth-Token': token,
@@ -102,14 +105,10 @@ export async function fetchKaspiOrdersRaw({
   shopId: string
 }): Promise<unknown> {
 const url = new URL(`${KASPI_API_BASE}/orders`)
-    url.searchParams.set('page[number]', String(pageNumber))
-    url.searchParams.set('page[size]', String(PAGE_SIZE))
-    if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
-    const now = Date.now()
-    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000
-    url.searchParams.set('filter[orders][creationDate][$ge]', String(now - fourteenDaysMs))
-    url.searchParams.set('filter[orders][creationDate][$le]', String(now))
-
+const url = new URL(`${KASPI_API_BASE}/orders`)
+  url.searchParams.set('page[number]', '0')
+  url.searchParams.set('page[size]', '5')
+  if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
   const res = await fetch(url.toString(), {
     headers: {
       'X-Auth-Token': token,
