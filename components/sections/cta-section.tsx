@@ -62,7 +62,7 @@ export function CtaSection() {
 
             <div className="flex flex-col gap-3 sm:flex-row">
               <a
-                href="https://wa.me/77471220267"
+                href="https://wa.me/77767286272"
                 className="wa-pulse inline-flex items-center justify-center gap-2.5 rounded-xl bg-[#25D366] px-6 py-3.5 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 w-full sm:w-auto"
               >
                 {WA_ICON}

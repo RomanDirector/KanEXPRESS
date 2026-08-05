@@ -53,14 +53,15 @@ export function Footer() {
           <div className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">Контакты</p>
             <ul className="space-y-2 text-sm text-gray-500">
-              <li>Алматы, Казахстан</li>
+              <li>Алматы, ул. Бокеева 1а</li>
+              <li>Ежедневно, 13:00–22:00</li>
               <li>
-                <a href="mailto:hello@kanexpress.kz" className="hover:text-gray-900 transition-colors">
-                  hello@kanexpress.kz
+                <a href="mailto:kaisarkan030490@gmail.com" className="hover:text-gray-900 transition-colors">
+                  kaisarkan030490@gmail.com
                 </a>
               </li>
               <li>
-                <a href="https://wa.me/77000000000" className="hover:text-gray-900 transition-colors">
+                <a href="https://wa.me/77767286272" className="hover:text-gray-900 transition-colors">
                   WhatsApp
                 </a>
               </li>
