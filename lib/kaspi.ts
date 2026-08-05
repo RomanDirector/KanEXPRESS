@@ -25,10 +25,11 @@ export interface KaspiOrder {
   code: string
   state: string
   creationDate: number
+  totalPrice?: number
+  phoneAlias?: string
   customer?: { cellPhone?: string }
   deliveryAddress?: { formattedAddress?: string; latitude?: number; longitude?: number }
 }
-
 interface KaspiOrdersResponse {
   data: Array<{ id: string; attributes: Omit<KaspiOrder, 'id'> }>
   meta?: { pageCount?: number }
@@ -116,19 +117,20 @@ export function mapKaspiStatus(state: string): string {
 }
 
 export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
+  const phone = order.phoneAlias?.split(',')[0]?.trim() || order.customer?.cellPhone || ''
   return {
     seller_id: sellerId,
     kaspi_order_id: order.id,
     order_number: order.code,
-    client_phone: order.customer?.cellPhone ?? '',
+    client_phone: phone,
     client_address: order.deliveryAddress?.formattedAddress ?? '',
+    price: order.totalPrice ?? 0,
     status: mapKaspiStatus(order.state),
     created_at: new Date(order.creationDate).toISOString(),
     lat: order.deliveryAddress?.latitude ?? null,
     lng: order.deliveryAddress?.longitude ?? null,
   }
 }
-
 export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
   token: string; kaspiOrderId: string; orderCode: string
 }): Promise<void> {
