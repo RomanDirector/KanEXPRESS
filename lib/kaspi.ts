@@ -117,7 +117,7 @@ export function mapKaspiStatus(state: string): string {
 }
 
 export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
-  const phone = order.phoneAlias?.split(',')[0]?.trim() || order.customer?.cellPhone || ''
+  const phone = order.phoneAlias?.trim() || order.customer?.cellPhone || ''
   return {
     seller_id: sellerId,
     kaspi_order_id: order.id,
