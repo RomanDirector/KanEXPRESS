@@ -43,14 +43,10 @@ export async function fetchKaspiOrders({
 }): Promise<KaspiOrder[]> {
   const orders: KaspiOrder[] = []
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
- const url = new URL(`${KASPI_API_BASE}/orders`)
-  url.searchParams.set('page[number]', '0')
-  url.searchParams.set('page[size]', '5')
-  if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
-  const now = Date.now()
-  const lookbackMs = 2 * 24 * 60 * 60 * 1000
-  url.searchParams.set('filter[orders][creationDate][$ge]', String(now - lookbackMs))
-  url.searchParams.set('filter[orders][creationDate][$le]', String(now))
+    const url = new URL(`${KASPI_API_BASE}/orders`)
+    url.searchParams.set('page[number]', String(pageNumber))
+    url.searchParams.set('page[size]', String(PAGE_SIZE))
+    if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
     const now = Date.now()
     const lookbackMs = 2 * 24 * 60 * 60 * 1000
     url.searchParams.set('filter[orders][creationDate][$ge]', String(now - lookbackMs))
@@ -89,6 +85,10 @@ export async function fetchKaspiOrdersRaw({
   url.searchParams.set('page[number]', '0')
   url.searchParams.set('page[size]', '5')
   if (shopId) url.searchParams.set('filter[orders][shopId]', shopId)
+  const now = Date.now()
+  const lookbackMs = 2 * 24 * 60 * 60 * 1000
+  url.searchParams.set('filter[orders][creationDate][$ge]', String(now - lookbackMs))
+  url.searchParams.set('filter[orders][creationDate][$le]', String(now))
   const res = await fetch(url.toString(), {
     headers: {
       'X-Auth-Token': token,
