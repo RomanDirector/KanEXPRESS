@@ -1,32 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-admin'
 
-// Активные (ещё не завершённые) стадии — используются для расчёта очереди у курьера
 const TERMINAL_STAGES = ['delivered', 'returned', 'cancelled']
 
 export async function GET(request: NextRequest) {
   const orderNumber = request.nextUrl.searchParams.get('order_number')?.trim()
-  const phoneLast4 = request.nextUrl.searchParams.get('phone_last4')?.trim()
 
-  if (!orderNumber || !phoneLast4) {
+  if (!orderNumber) {
     return NextResponse.json(
-      { error: 'Параметры order_number и phone_last4 обязательны' },
-      { status: 400 }
-    )
-  }
-
-  if (!/^\d{4}$/.test(phoneLast4)) {
-    return NextResponse.json(
-      { error: 'phone_last4 должен состоять из 4 цифр' },
+      { error: 'Параметр order_number обязателен' },
       { status: 400 }
     )
   }
 
   const supabase = createAdminClient()
-
   const { data: order, error } = await supabase
     .from('orders')
-    .select('order_number, status, courier_stage, client_address, client_phone, created_at, courier_name')
+    .select('order_number, status, courier_stage, client_address, created_at, courier_name')
     .eq('order_number', orderNumber)
     .maybeSingle()
 
@@ -37,11 +27,7 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // Сверяем последние 4 цифры телефона на сервере. Не найден заказ и неверный
-  // телефон дают одинаковый 404 — иначе по коду ответа можно было бы понять,
-  // что номер заказа угадан верно, а телефон нет.
-  const orderPhoneLast4 = order?.client_phone?.replace(/\D/g, '').slice(-4) ?? ''
-  if (!order || orderPhoneLast4 !== phoneLast4) {
+  if (!order) {
     return NextResponse.json({ error: 'Заказ не найден' }, { status: 404 })
   }
 
@@ -60,9 +46,6 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       )
     }
-    // +1: count — это число заказов перед этим, а фронт показывает
-    // "Ваш заказ #{position}" как позицию/ранг в очереди (1 = следующий),
-    // а не количество заказов впереди.
     queuePosition = (count ?? 0) + 1
   }
 
