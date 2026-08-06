@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, type FormEvent } from 'react'
 import { Navbar } from '@/components/layout/navbar'
 import { Footer } from '@/components/layout/footer'
@@ -63,7 +62,6 @@ function LangSwitcher() {
 function OrderTrackingContent() {
   const { t } = useLang()
   const [orderNumber, setOrderNumber] = useState('')
-  const [phoneLast4, setPhoneLast4] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<TrackResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,18 +79,14 @@ function OrderTrackingContent() {
   const handleSearch = async (e: FormEvent) => {
     e.preventDefault()
     const trimmedOrder = orderNumber.trim()
-    const trimmedPhone = phoneLast4.trim()
-    if (!trimmedOrder || !/^\d{4}$/.test(trimmedPhone)) return
-
+    if (!trimmedOrder) return
     setLoading(true)
     setError(null)
     setResult(null)
-
     try {
       const res = await fetch(
-        `/api/track-order?order_number=${encodeURIComponent(trimmedOrder)}&phone_last4=${encodeURIComponent(trimmedPhone)}`
+        `/api/track-order?order_number=${encodeURIComponent(trimmedOrder)}`
       )
-
       if (res.status === 404) {
         setResult({ found: false })
       } else {
@@ -119,24 +113,20 @@ function OrderTrackingContent() {
   return (
     <div className="min-h-full flex flex-col bg-[#f8f8f8]">
       <Navbar />
-
       <main className="flex-1 mx-auto w-full max-w-2xl px-6 pt-36 pb-20">
         <div className="flex justify-end">
           <LangSwitcher />
         </div>
-
         <h1 className="mt-4 text-3xl font-black tracking-tight text-gray-900 text-center">
           {t('trackOrderTitle')}
         </h1>
         <p className="mt-2 text-center text-sm text-gray-400">
           {t('trackOrderSubtitle')}
         </p>
-
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 text-sm text-blue-800">
           <Info size={18} className="mt-0.5 flex-shrink-0 text-blue-500" />
           <p>{t('trackInfoText')}</p>
         </div>
-
         <form onSubmit={handleSearch} className="mt-6 flex flex-col gap-3 sm:flex-row">
           <input
             type="text"
@@ -145,32 +135,20 @@ function OrderTrackingContent() {
             placeholder={t('trackOrderNumberPlaceholder')}
             className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition-colors focus:border-primary"
           />
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={4}
-            value={phoneLast4}
-            onChange={(e) => setPhoneLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder={t('trackPhoneLast4Placeholder')}
-            aria-label={t('trackPhoneLast4AriaLabel')}
-            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none transition-colors focus:border-primary sm:w-56"
-          />
           <button
             type="submit"
-            disabled={loading || !orderNumber.trim() || !/^\d{4}$/.test(phoneLast4.trim())}
+            disabled={loading || !orderNumber.trim()}
             className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
           >
             <Search size={16} />
             {loading ? t('trackSearchingLabel') : t('findOrderBtn')}
           </button>
         </form>
-
         {error && (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
             {error}
           </div>
         )}
-
         {result && !result.found && (
           <div className="mt-8 flex flex-col items-center gap-3 rounded-2xl border border-gray-100 bg-white py-14 text-center shadow-sm">
             <SearchX size={40} className="text-gray-300" />
@@ -179,7 +157,6 @@ function OrderTrackingContent() {
             </p>
           </div>
         )}
-
         {result?.found && stage && StageIcon && (
           <div className="mt-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
@@ -191,12 +168,10 @@ function OrderTrackingContent() {
                 {STAGE_LABEL_LOCAL[stage]}
               </div>
             </div>
-
             <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
               <MapPin size={15} className="flex-shrink-0 text-gray-400" />
               <span>{result.client_address}</span>
             </div>
-
             {!TERMINAL_STAGES.includes(stage) && (
               <div className="mt-5 rounded-xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
                 {t('trackQueuePositionMsg').replace('{position}', String(result.queue_position))}
@@ -205,7 +180,6 @@ function OrderTrackingContent() {
           </div>
         )}
       </main>
-
       <Footer />
     </div>
   )
