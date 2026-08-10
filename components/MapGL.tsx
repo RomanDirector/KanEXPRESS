@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, CircleMarker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { buildWarehouseIcon } from '@/lib/map-icons'
@@ -50,6 +50,11 @@ export interface MapGLProps {
   onPointClick?: (point: MapPoint) => void
   // клик по пустому месту карты (не по маркеру) — используется, чтобы снять выделение
   onBackgroundClick?: () => void
+  // номер остановки (1-based) по id точки — используется для нумерации пинов
+  // и построения линии маршрута курьера
+  routeOrder?: Record<string, number>
+  // живая геопозиция курьера — рисуется отдельным маркером на карте
+  courierPosition?: { lat: number; lng: number } | null
 }
 
 // Отдельный компонент, а не onClick на обёртке: клики по маркерам должны
@@ -101,18 +106,23 @@ function isValidAlmatyPoint(point: MapPoint) {
 // Кастомная цветная иконка-пин через L.divIcon вместо L.Icon.Default — так
 // не возникает известная проблема Leaflet+webpack с битыми путями к
 // marker-icon.png/marker-shadow.png (default-иконка нигде не используется).
-function buildMarkerIcon(color: string, selected: boolean) {
+function buildMarkerIcon(color: string, selected: boolean, number?: number) {
   const width = selected ? 40 : 32
   const height = selected ? 50 : 40
   const ring = selected
     ? '<circle cx="16" cy="16" r="14" fill="none" stroke="white" stroke-width="3"/>'
     : ''
+  const label =
+    number != null
+      ? `<text x="16" y="16" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="${color}">${number}</text>`
+      : ''
 
   const svg =
     `<svg width="100%" height="100%" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">` +
     `<path d="M16 0C7.163 0 0 7.163 0 16C0 28 16 40 16 40C16 40 32 28 32 16C32 7.163 24.837 0 16 0Z" fill="${color}"/>` +
     ring +
     '<circle cx="16" cy="16" r="7" fill="white"/>' +
+    label +
     '</svg>'
 
   return L.divIcon({
@@ -135,10 +145,20 @@ export function MapGL({
   selectedId,
   onPointClick,
   onBackgroundClick,
+  routeOrder,
+  courierPosition,
 }: MapGLProps) {
   const colors = statusColors ?? DEFAULT_STATUS_COLORS
   const validPoints = useMemo(() => points.filter(isValidAlmatyPoint), [points])
   const warehouseIcon = useMemo(() => buildWarehouseIcon(), [])
+
+  const routeLinePositions = useMemo(() => {
+    if (!routeOrder) return []
+    return validPoints
+      .filter((point) => routeOrder[point.id] != null)
+      .sort((a, b) => routeOrder[a.id] - routeOrder[b.id])
+      .map((point) => [point.lat, point.lng] as [number, number])
+  }, [validPoints, routeOrder])
 
   return (
     <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
@@ -154,6 +174,13 @@ export function MapGL({
         />
 
         <BackgroundClickHandler onBackgroundClick={onBackgroundClick} />
+
+        {routeLinePositions.length > 1 && (
+          <Polyline
+            positions={routeLinePositions}
+            pathOptions={{ color: '#2563EB', weight: 3, opacity: 0.6, dashArray: '6 8' }}
+          />
+        )}
 
         {zones?.map((zone) => {
           const positions = zone.coordinates.coordinates[0].map(
@@ -172,7 +199,8 @@ export function MapGL({
 
         {validPoints.map((point) => {
           const isSelected = point.id === selectedId
-          const icon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected)
+          const stopNumber = routeOrder?.[point.id]
+          const icon = buildMarkerIcon(colors[point.status] || '#EF4444', isSelected, stopNumber)
 
           return (
             <Marker
@@ -186,6 +214,7 @@ export function MapGL({
             >
               <Popup>
                 <div className="text-sm space-y-1">
+                  {stopNumber != null && <p className="font-bold">Остановка {stopNumber}</p>}
                   <p className="font-mono font-bold">{point.order_number}</p>
                   <p>{point.client_address}</p>
                   <p>{point.client_phone}</p>
@@ -224,6 +253,16 @@ export function MapGL({
             </Marker>
           )
         })}
+
+        {courierPosition && (
+          <CircleMarker
+            center={[courierPosition.lat, courierPosition.lng]}
+            radius={8}
+            pathOptions={{ color: '#FFFFFF', weight: 2, fillColor: '#2563EB', fillOpacity: 1 }}
+          >
+            <Popup>Вы здесь</Popup>
+          </CircleMarker>
+        )}
       </MapContainer>
     </div>
   )

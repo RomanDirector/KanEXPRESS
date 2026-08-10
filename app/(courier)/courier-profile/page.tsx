@@ -67,6 +67,7 @@ export default function CourierProfilePage() {
         .from('orders')
         .select('id, order_number, courier_stage, courier_fee, seller_id, status, created_at, is_paid_to_courier')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
         .order('created_at', { ascending: false })
 
       if (error) console.error(error.message)

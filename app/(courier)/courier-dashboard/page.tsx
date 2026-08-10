@@ -144,6 +144,7 @@ export default function CourierDashboardPage() {
         .from('orders')
         .select('*')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
         .neq('courier_stage', 'delivered')
         .neq('courier_stage', 'cancelled')
         .order('created_at', { ascending: true })
@@ -173,6 +174,7 @@ export default function CourierDashboardPage() {
         .from('orders')
         .select('courier_fee, created_at')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
         .eq('courier_stage', 'delivered')
       if (error) {
         console.error(error.message)
