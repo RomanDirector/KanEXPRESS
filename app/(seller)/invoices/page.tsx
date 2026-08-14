@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import jsPDF from 'jspdf'
-import JsBarcode from 'jsbarcode'
-import QRCode from 'qrcode'
 import { Download } from 'lucide-react'
 import { useLang } from '@/lib/i18n'
 import { Toast } from '@/components/Toast'
+import { generatePDF, generateLabel } from '@/lib/invoice-pdf'
 
 interface Order {
   id: string
@@ -19,7 +17,7 @@ interface Order {
   created_at: string
   product_name: string | null
   zone_id: string | null
-  zones: { name: string } | null
+  zones: { name: string; display_number: number | null } | null
 }
 
 interface SellerInfo {
@@ -33,108 +31,6 @@ const STATUS_RU: Record<string, string> = {
   pending: 'Не отгружено',
   in_transit: 'В пути',
   delivered: 'Доставлено',
-}
-
-async function generatePDF(order: Order, seller: SellerInfo | null) {
-  const doc = new jsPDF()
-
-  doc.setFontSize(22)
-  doc.setTextColor(220, 0, 0)
-  doc.text('KanEXpress', 20, 20)
-  doc.setFontSize(12)
-  doc.setTextColor(0, 0, 0)
-  doc.text('Накладная', 20, 30)
-
-  if (order.zone_id && order.zones?.name) {
-    doc.setFontSize(28)
-    doc.setTextColor(220, 0, 0)
-    doc.text(order.zones.name, 190, 22, { align: 'right' })
-  }
-
-  doc.setDrawColor(220, 0, 0)
-  doc.line(20, 35, 190, 35)
-
-  // Таблица "Отправитель / Получатель" (как в накладной у конкурента)
-  const tableTop = 42
-  const tableHeaderH = 8
-  const tableH = 46
-  const tableMidX = 105
-  doc.setDrawColor(0, 0, 0)
-  doc.rect(20, tableTop, 170, tableH)
-  doc.line(tableMidX, tableTop, tableMidX, tableTop + tableH)
-  doc.line(20, tableTop + tableHeaderH, 190, tableTop + tableHeaderH)
-
-  doc.setFontSize(9)
-  doc.setTextColor(120, 120, 120)
-  doc.text('ОТПРАВИТЕЛЬ', 23, tableTop + 5.5)
-  doc.text('ПОЛУЧАТЕЛЬ', tableMidX + 3, tableTop + 5.5)
-
-  doc.setFontSize(11)
-  doc.setTextColor(0, 0, 0)
-  doc.text(seller?.organization_name || 'KanEXpress', 23, tableTop + tableHeaderH + 8)
-  doc.text(seller?.phone || '-', 23, tableTop + tableHeaderH + 16)
-
-  doc.text(order.client_phone, tableMidX + 3, tableTop + tableHeaderH + 8)
-  const addressLines = doc.splitTextToSize(order.client_address, 62)
-  doc.text(addressLines, tableMidX + 3, tableTop + tableHeaderH + 16)
-
-  let y = tableTop + tableH + 12
-  doc.setFontSize(11)
-  doc.text(`Заказ: ${order.order_number}`, 20, y); y += 10
-  doc.text(`Цена: ${order.price} ₸`, 20, y); y += 10
-  doc.text(`Статус: ${STATUS_RU[order.status] ?? order.status}`, 20, y); y += 10
-  doc.text(`Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, 20, y); y += 10
-
-  if (order.product_name) {
-    doc.text(order.product_name, 20, y)
-    y += 10
-  }
-
-  // Штрихкод
-  const canvas = document.createElement('canvas')
-  JsBarcode(canvas, order.order_number, { format: 'CODE128', width: 2, height: 60, displayValue: true })
-  doc.addImage(canvas.toDataURL('image/png'), 'PNG', 20, y, 110, 35)
-
-  // QR-код (ведёт на страницу отслеживания заказа)
-  const qrDataUrl = await QRCode.toDataURL(`https://kanexpress.kz/order-tracking?order_number=${order.order_number}`, { width: 200 })
-  doc.addImage(qrDataUrl, 'PNG', 140, y, 40, 40)
-
-  y += 45
-  doc.line(20, y, 190, y)
-  doc.setFontSize(9)
-  doc.setTextColor(150, 150, 150)
-  doc.text('KanEXpress — логистика для продавцов Kaspi.kz', 20, y + 7)
-
-  doc.save(`invoice-${order.order_number}.pdf`)
-}
-
-// Ярлык-этикетка для наклейки на посылку (маленький формат)
-async function generateLabel(order: Order) {
-  const doc = new jsPDF({ format: [100, 70], orientation: 'landscape' })
-
-  doc.setFontSize(14)
-  doc.setTextColor(220, 0, 0)
-  doc.text('KanEXpress', 5, 10)
-
-  if (order.zone_id && order.zones?.name) {
-    doc.setFontSize(18)
-    doc.setTextColor(220, 0, 0)
-    doc.text(order.zones.name, 95, 10, { align: 'right' })
-  }
-
-  doc.setFontSize(10)
-  doc.setTextColor(0, 0, 0)
-  doc.text(`${order.order_number}`, 5, 18)
-  doc.text(`${order.client_phone}`, 5, 25)
-
-  const canvas = document.createElement('canvas')
-  JsBarcode(canvas, order.order_number, { format: 'CODE128', width: 2, height: 40, displayValue: false })
-  doc.addImage(canvas.toDataURL('image/png'), 'PNG', 5, 30, 60, 20)
-
-  const qrDataUrl = await QRCode.toDataURL(order.order_number, { width: 100 })
-  doc.addImage(qrDataUrl, 'PNG', 70, 25, 25, 25)
-
-  doc.save(`label-${order.order_number}.pdf`)
 }
 
 export default function InvoicesPage() {
@@ -160,7 +56,7 @@ export default function InvoicesPage() {
       const [{ data, error }, { data: sellerData, error: sellerError }] = await Promise.all([
         supabase
           .from('orders')
-          .select('id, order_number, client_phone, client_address, status, price, created_at, product_name, zone_id, zones ( name )')
+          .select('id, order_number, client_phone, client_address, status, price, created_at, product_name, zone_id, zones ( name, display_number )')
           .eq('seller_id', user.id)
           .order('created_at', { ascending: false }),
         supabase

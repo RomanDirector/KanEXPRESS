@@ -13,6 +13,7 @@ export interface SellerProfile {
   kaspi_shop_id: string | null
   created_at: string
   company_logo_url: string | null
+  access_status: 'pending' | 'approved' | 'banned'
 }
 
 export const SellerContext = createContext<SellerProfile | null>(null)

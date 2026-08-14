@@ -15,6 +15,10 @@ export interface MapPoint {
   client_phone: string
   status: string
   price: number
+  // Опционально — для админской карты всех заказов (показ продавца/курьера
+  // в попапе). Обычные страницы продавца/курьера их не передают.
+  seller_name?: string
+  courier_name?: string | null
 }
 
 export interface MapZone {
@@ -187,9 +191,12 @@ export function MapGL({
               <Popup>
                 <div className="text-sm space-y-1">
                   <p className="font-mono font-bold">{point.order_number}</p>
+                  {point.seller_name && <p className="font-semibold">{point.seller_name}</p>}
                   <p>{point.client_address}</p>
                   <p>{point.client_phone}</p>
                   <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>
+                  <p className="text-gray-500">{point.status}</p>
+                  {point.courier_name !== undefined && <p className="text-gray-500">Курьер: {point.courier_name || '—'}</p>}
                 </div>
               </Popup>
             </Marker>

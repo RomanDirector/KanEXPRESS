@@ -13,6 +13,7 @@ export interface CourierProfile {
   vehicle_type: string | null
   car_number: string | null
   zone: string | null
+  access_status: 'pending' | 'approved' | 'banned'
 }
 
 export const CourierContext = createContext<CourierProfile | null>(null)

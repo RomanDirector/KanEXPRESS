@@ -1,5 +1,6 @@
 import { createAdminClient } from './supabase-admin'
 import { fetchKaspiOrders, mapKaspiOrderToRow, isValidKaspiToken } from './kaspi'
+import { assignZoneIdsForSeller } from './zone-match'
 
 // Импорты относительные (не через алиас '@/lib/...'), т.к. этот модуль
 // используется и Next.js роутами, и Netlify Function — последнюю Netlify
@@ -70,6 +71,15 @@ export async function syncKaspiOrders(sellerId?: string): Promise<SellerSyncResu
           .upsert(rows, { onConflict: 'seller_id,order_number' })
 
         if (upsertError) throw new Error(upsertError.message)
+
+        // Автоприсвоение zone_id только что синканным заказам (без курьера,
+        // это делает отдельно ручной бэкфилл в lib/zones.ts). Ошибка здесь
+        // не должна ронять синк заказов — только логируется.
+        try {
+          await assignZoneIdsForSeller(supabase, seller.id)
+        } catch (zoneErr) {
+          console.error(`[kaspi-sync] продавец ${seller.id}: ошибка авто-присвоения зон`, zoneErr)
+        }
       }
 
       results.push({ sellerId: seller.id, synced: rows.length })

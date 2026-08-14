@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-admin'
 
 // Управление пулом ключей геокодирования (сейчас — 2GIS).
-// Временная защита для MVP: доступ только email из ADMIN_EMAILS,
-// пока нет полноценной системы ролей admin.
+// Доступ: таблица admins — основная проверка.
 
 function getAdminEmails(): string[] {
   return (process.env.ADMIN_EMAILS ?? '')
@@ -19,11 +18,23 @@ async function requireAdmin(request: NextRequest) {
 
   const supabase = createAdminClient()
   const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user?.email) return null
+  if (error || !data.user) return null
 
-  if (!getAdminEmails().includes(data.user.email.toLowerCase())) return null
+  const { data: admin } = await supabase
+    .from('admins')
+    .select('id')
+    .eq('id', data.user.id)
+    .maybeSingle()
 
-  return data.user
+  if (admin) return data.user
+
+  // TODO deprecated: проверка по ADMIN_EMAILS оставлена как запасной путь на время
+  // миграции на таблицу admins — убрать, когда все админы будут заведены в таблице.
+  if (data.user.email && getAdminEmails().includes(data.user.email.toLowerCase())) {
+    return data.user
+  }
+
+  return null
 }
 
 export async function GET(request: NextRequest) {

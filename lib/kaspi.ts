@@ -81,6 +81,15 @@ export async function fetchKaspiOrders({
     }
 
     const json = (await res.json()) as KaspiOrdersResponse
+
+    // TODO(kaspi-delivery-mode): разведка — сверить, есть ли в ответе Kaspi поле
+    // способа доставки (deliveryMode или аналог), прежде чем на него полагаться
+    // где-либо в фильтрах. Логируем один раз за синк (первая страница), не на
+    // каждый заказ, чтобы не засорять логи.
+    if (pageNumber === 0 && json.data.length > 0) {
+      console.log('[kaspi] ключи attributes первого заказа (разведка deliveryMode):', Object.keys(json.data[0].attributes))
+    }
+
     const pageOrders = json.data.map((item) => ({ id: item.id, ...item.attributes }))
     orders.push(...pageOrders)
 
