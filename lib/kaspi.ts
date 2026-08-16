@@ -40,6 +40,7 @@ export interface KaspiOrder {
   creationDate: number
   customer?: { cellPhone?: string }
   deliveryAddress?: { formattedAddress?: string; latitude?: number; longitude?: number }
+  isKaspiDelivery?: boolean
 }
 
 interface KaspiOrdersResponse {
@@ -159,6 +160,7 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
     created_at: new Date(order.creationDate).toISOString(),
     lat: order.deliveryAddress?.latitude ?? null,
     lng: order.deliveryAddress?.longitude ?? null,
+    is_kaspi_delivery: order.isKaspiDelivery ?? false,
   }
 }
 
