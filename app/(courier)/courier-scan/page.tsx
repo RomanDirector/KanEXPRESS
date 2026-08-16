@@ -8,7 +8,6 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Toast } from '@/components/Toast'
-import { waTemplates, openWhatsApp } from '@/lib/whatsapp-templates'
 import { Camera, CheckCircle2, AlertTriangle, Package } from 'lucide-react'
 
 interface OrderRow {
@@ -161,7 +160,6 @@ export default function CourierScanPage() {
 
   async function confirmPickup() {
     if (!resultOrder) return
-    const statusChanged = resultOrder.status !== 'in_transit'
     const { error } = await supabase
       .from('orders')
       .update({
@@ -177,11 +175,6 @@ export default function CourierScanPage() {
     }
 
     setSuccessMsg('Приёмка подтверждена')
-    if (statusChanged && resultOrder.client_phone) {
-      const text = waTemplates.order_in_transit({ number: resultOrder.order_number })
-      openWhatsApp(resultOrder.client_phone, text)
-      setToast({ message: 'WhatsApp-уведомление отправлено', type: 'success' })
-    }
     setResultOrder(null)
     setResultBox(null)
   }
