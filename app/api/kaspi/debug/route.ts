@@ -43,9 +43,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Не авторизован' }, { status: 401 })
   }
 
+  const supabase = createAdminClient()
+
+  // Роут отдаёт сырые ПДн клиентов Kaspi — доступ только пользователям из таблицы admins.
+  const { data: admin, error: adminError } = await supabase
+    .from('admins')
+    .select('id')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (adminError || !admin) {
+    return NextResponse.json({ error: 'Доступ запрещён' }, { status: 403 })
+  }
+
   const sellerId = user.id
 
-  const supabase = createAdminClient()
   const { data: seller, error } = await supabase
     .from('sellers')
     .select('id, kaspi_token, kaspi_shop_id')

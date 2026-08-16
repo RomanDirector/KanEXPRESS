@@ -72,6 +72,25 @@ export default function CourierLayout({ children }: { children: React.ReactNode 
     )
   }
 
+  // Гейт доступа: курьер с access_status 'pending'/'banned' видит только это,
+  // без сайдбара и без доступа к данным других разделов панели.
+  if (courier.access_status === 'banned' || courier.access_status === 'pending') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-secondary px-4">
+        <div className="bg-card rounded-2xl border border-border shadow-sm p-8 max-w-sm w-full text-center">
+          <h1 className="text-lg font-black text-foreground mb-2">Доступ ограничен</h1>
+          <p className="text-sm text-muted-foreground mb-6">Обратитесь к администратору KanExpress</p>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2.5 rounded-xl border border-border text-muted-foreground text-sm font-semibold hover:bg-accent transition-all"
+          >
+            Выйти
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <CourierContext.Provider value={courier}>
       <div className="flex min-h-screen bg-secondary">

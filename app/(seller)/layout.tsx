@@ -3,11 +3,30 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine, Menu } from 'lucide-react'
+import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine, Menu, RotateCcw } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
-import { supabase } from '@/lib/supabase'
+import { supabase, signOutAndRedirect } from '@/lib/supabase'
 import { SellerContext, useSeller, type SellerProfile } from '@/lib/seller-context'
 import { Spinner } from '@/components/ui/spinner'
+
+// Гейт доступа: продавец с access_status 'pending'/'banned' видит только это,
+// без сайдбара и без доступа к данным других разделов панели.
+function AccessRestrictedScreen() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-sm w-full text-center">
+        <h1 className="text-lg font-black text-gray-900 mb-2">Доступ ограничен</h1>
+        <p className="text-sm text-gray-500 mb-6">Обратитесь к администратору KanExpress</p>
+        <button
+          onClick={() => signOutAndRedirect()}
+          className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
+        >
+          Выйти
+        </button>
+      </div>
+    </div>
+  )
+}
 
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname()
@@ -28,6 +47,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
     { href: '/staff',           label: t('staff'),         icon: Users },
     { href: '/archive',         label: t('archive'),       icon: Archive },
     { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
+    { href: '/returns',         label: t('returns'),       icon: RotateCcw },
     { href: '/profile',         label: t('profileNav'),   icon: User },
   ]
 
@@ -143,7 +163,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
       const { data: sellerProfile, error } = await supabase
         .from('sellers')
-        .select('id, full_name, phone, email, organization_name, organization_address, kaspi_token, kaspi_shop_id, created_at, company_logo_url')
+        .select('id, full_name, phone, email, organization_name, organization_address, kaspi_token, kaspi_shop_id, created_at, company_logo_url, access_status')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -171,6 +191,10 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
         <Spinner className="size-6 text-muted-foreground" />
       </div>
     )
+  }
+
+  if (seller.access_status === 'banned' || seller.access_status === 'pending') {
+    return <AccessRestrictedScreen />
   }
 
   return <SellerContext.Provider value={seller}>{children}</SellerContext.Provider>

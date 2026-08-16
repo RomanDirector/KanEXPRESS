@@ -53,6 +53,7 @@ export default function CourierCancelledPage() {
         .from('orders')
         .select('id, order_number, client_address, cancel_reason, cancelled_by, cancelled_at')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
         .eq('courier_stage', 'cancelled')
         .order('cancelled_at', { ascending: false })
 

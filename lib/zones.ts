@@ -1,5 +1,5 @@
-import * as turf from '@turf/turf'
 import { supabase } from '@/lib/supabase'
+import { pointInZone } from '@/lib/zone-match'
 
 export interface Zone {
   id: string
@@ -8,18 +8,9 @@ export interface Zone {
   coordinates: GeoJSON.Polygon
 }
 
-export function pointInZone(lat: number, lng: number, zones: Zone[]): Zone | null {
-  const point = turf.point([lng, lat])
-  for (const zone of zones) {
-    try {
-      const polygon = turf.polygon(zone.coordinates.coordinates)
-      if (turf.booleanPointInPolygon(point, polygon)) return zone
-    } catch (e) {
-      console.error('Ошибка проверки зоны', zone.name, e)
-    }
-  }
-  return null
-}
+// Геометрия point-in-polygon вынесена в lib/zone-match.ts, чтобы её же мог
+// использовать серверный lib/kaspi-sync.ts (без дублирования кода).
+export { pointInZone }
 
 export async function loadZones(): Promise<Zone[]> {
   const {
@@ -61,7 +52,7 @@ export async function assignZonesToOrders(): Promise<{ assigned: number; unassig
   const { data: orders, error } = await supabase
     .from('orders').select('id, lat, lng')
     .eq('seller_id', user.id)
-    .is('courier_name', null).eq('status', 'pending')
+    .is('courier_name', null).in('status', ['pending', 'in_transit'])
     .not('lat', 'is', null).not('lng', 'is', null)
   if (error || !orders) { console.error('Ошибка загрузки заказов:', error); return { assigned: 0, unassigned: 0 } }
 

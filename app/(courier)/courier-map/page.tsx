@@ -31,6 +31,48 @@ interface Order {
 
 const STAGES: DisplayStage[] = ['not_started', 'dropped', 'departed', 'arrived', 'delivered', 'returned']
 
+interface LatLng {
+  lat: number
+  lng: number
+}
+
+// Расстояние по прямой между двумя точками (формула гаверсинуса), км.
+function haversineKm(a: LatLng, b: LatLng): number {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const lat1 = (a.lat * Math.PI) / 180
+  const lat2 = (b.lat * Math.PI) / 180
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+// Жадный алгоритм "ближайший сосед": на каждом шаге выбирает ближайшую из
+// оставшихся точек к текущей позиции и переходит туда.
+function nearestNeighborOrder<T extends LatLng>(start: LatLng, stops: T[]): T[] {
+  const remaining = [...stops]
+  const ordered: T[] = []
+  let current = start
+
+  while (remaining.length > 0) {
+    let nearestIndex = 0
+    let nearestDistance = Infinity
+    for (let i = 0; i < remaining.length; i++) {
+      const distance = haversineKm(current, remaining[i])
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearestIndex = i
+      }
+    }
+    const [nearest] = remaining.splice(nearestIndex, 1)
+    ordered.push(nearest)
+    current = nearest
+  }
+
+  return ordered
+}
+
 const STAGE_ICON: Record<DisplayStage, typeof Package> = {
   not_started: Package,
   dropped: Package,
@@ -63,6 +105,23 @@ export default function CourierMapPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<DisplayStage | 'all'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [courierPos, setCourierPos] = useState<LatLng | null>(null)
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setCourierPos({ lat: position.coords.latitude, lng: position.coords.longitude })
+      },
+      (error) => {
+        console.error(error.message)
+      },
+      { enableHighAccuracy: true },
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [])
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -71,6 +130,7 @@ export default function CourierMapPage() {
         .from('orders')
         .select('*')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
         .neq('courier_stage', 'delivered')
         .neq('courier_stage', 'cancelled')
         .order('created_at', { ascending: true })
@@ -150,7 +210,29 @@ export default function CourierMapPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedId])
 
-  const filteredOrders = filter === 'all' ? orders : orders.filter((o) => getDisplayStage(o) === filter)
+  const routeStart = useMemo<LatLng | null>(() => {
+    if (courierPos) return courierPos
+    const firstWarehouse = warehouses[0]
+    return firstWarehouse ? { lat: firstWarehouse.lat, lng: firstWarehouse.lng } : null
+  }, [courierPos, warehouses])
+
+  const { orderedOrders, routeIndexById } = useMemo(() => {
+    const routable = orders.filter(
+      (o): o is Order & { lat: number; lng: number } => o.lat != null && o.lng != null,
+    )
+    const unroutable = orders.filter((o) => o.lat == null || o.lng == null)
+    const sequence = routeStart ? nearestNeighborOrder(routeStart, routable) : routable
+
+    const routeIndexById: Record<string, number> = {}
+    sequence.forEach((o, i) => {
+      routeIndexById[o.id] = i + 1
+    })
+
+    return { orderedOrders: [...sequence, ...unroutable], routeIndexById }
+  }, [orders, routeStart])
+
+  const filteredOrders =
+    filter === 'all' ? orderedOrders : orderedOrders.filter((o) => getDisplayStage(o) === filter)
 
   const points: MapPoint[] = filteredOrders.map((o) => ({
     id: o.id,
@@ -205,6 +287,12 @@ export default function CourierMapPage() {
         ) : (
           <div className="flex flex-col md:flex-row gap-6 items-start">
             <div className="w-full md:w-96 md:shrink-0 space-y-3">
+              {!courierPos && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Геолокация недоступна — маршрут строится от склада, разрешите доступ к
+                  геолокации для точного порядка объезда
+                </div>
+              )}
               {filteredOrders.length === 0 ? (
                 <div className="text-center py-16 text-muted-foreground">Заказов нет</div>
               ) : (
@@ -213,6 +301,7 @@ export default function CourierMapPage() {
                   const StageIcon = STAGE_ICON[stage]
                   const isSelected = order.id === selectedId
                   const route = routeUrl(order)
+                  const stopNumber = routeIndexById[order.id]
 
                   return (
                     <Card
@@ -224,7 +313,14 @@ export default function CourierMapPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="font-mono font-bold">{order.order_number}</p>
+                          <p className="font-mono font-bold flex items-center gap-2">
+                            {stopNumber != null && (
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                                {stopNumber}
+                              </span>
+                            )}
+                            {order.order_number}
+                          </p>
                           <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                             <Phone className="h-3 w-3" />
                             {order.client_phone}
@@ -284,6 +380,8 @@ export default function CourierMapPage() {
                   selectedId={selectedId}
                   onPointClick={(point) => setSelectedId(point.id)}
                   onBackgroundClick={() => setSelectedId(null)}
+                  routeOrder={routeIndexById}
+                  courierPosition={courierPos}
                 />
 
                 <Card className="absolute bottom-4 left-4 rounded-2xl p-3 space-y-1.5 shadow-sm">

@@ -13,6 +13,10 @@ import { Toast } from '@/components/Toast'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
+const PAGE_SIZE = 15
+const ORDER_COLUMNS =
+  'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 
 interface Order {
@@ -64,10 +68,21 @@ export default function SellerDashboard() {
   const [distributing, setDistributing] = useState(false)
   const [photoOrder, setPhotoOrder] = useState<Order | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [returnOrder, setReturnOrder] = useState<Order | null>(null)
+  const [returnReason, setReturnReason] = useState('')
+  const [submittingReturn, setSubmittingReturn] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success'; actionLabel?: string; actionHref?: string } | null>(null)
   const [sellerId, setSellerId] = useState<string | null>(null)
   const [massUpdating, setMassUpdating] = useState(false)
   const [syncingKaspi, setSyncingKaspi] = useState(false)
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [statCounts, setStatCounts] = useState<Record<OrderStatus, number>>({
+    pending: 0,
+    in_transit: 0,
+    delivered: 0,
+  })
 
   useEffect(() => {
     if (!photoOrder) return
@@ -78,42 +93,64 @@ export default function SellerDashboard() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [photoOrder])
 
-  async function refreshOrders() {
-    if (!sellerId) return
-    setLoading(true)
+  // Постраничная загрузка (по PAGE_SIZE) — pageIndex это номер страницы (0-based),
+  // replace=true сбрасывает список на первую страницу (используется при рефреше/реалтайме).
+  async function fetchOrdersPage(currentSellerId: string, pageIndex: number, replace: boolean) {
+    const from = pageIndex * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
     const { data, error } = await supabase
       .from('orders')
-      .select(
-        'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
-      )
-      .eq('seller_id', sellerId)
+      .select(ORDER_COLUMNS)
+      .eq('seller_id', currentSellerId)
       .order('created_at', { ascending: false })
+      .range(from, to)
     if (error) {
       console.error(error.message)
       setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
-    } else setOrders(data as Order[])
+      return
+    }
+    const rows = (data || []) as Order[]
+    setOrders((prev) => (replace ? rows : [...prev, ...rows]))
+    setHasMore(rows.length === PAGE_SIZE)
+    setPage(pageIndex + 1)
+  }
+
+  // Счётчики по статусам — отдельный лёгкий count-запрос, не зависит от того,
+  // сколько страниц заказов сейчас подгружено в таблице.
+  async function fetchStatCounts(currentSellerId: string) {
+    const statuses: OrderStatus[] = ['pending', 'in_transit', 'delivered']
+    const results = await Promise.all(
+      statuses.map((status) =>
+        supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .eq('seller_id', currentSellerId)
+          .eq('status', status)
+      )
+    )
+    setStatCounts({
+      pending: results[0].count ?? 0,
+      in_transit: results[1].count ?? 0,
+      delivered: results[2].count ?? 0,
+    })
+  }
+
+  async function refreshOrders() {
+    if (!sellerId) return
+    setLoading(true)
+    await Promise.all([fetchOrdersPage(sellerId, 0, true), fetchStatCounts(sellerId)])
     setLoading(false)
+  }
+
+  async function loadMoreOrders() {
+    if (!sellerId || loadingMore || !hasMore) return
+    setLoadingMore(true)
+    await fetchOrdersPage(sellerId, page, false)
+    setLoadingMore(false)
   }
 
   useEffect(() => {
     let cancelled = false
-
-    async function fetchOrders(currentSellerId: string) {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('orders')
-        .select(
-          'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
-        )
-        .eq('seller_id', currentSellerId)
-        .order('created_at', { ascending: false })
-      if (error) {
-        console.error(error.message)
-        setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
-      } else setOrders(data as Order[])
-      setLoading(false)
-    }
-
     let channel: ReturnType<typeof supabase.channel> | null = null
 
     ;(async () => {
@@ -122,13 +159,18 @@ export default function SellerDashboard() {
       } = await supabase.auth.getUser()
       if (cancelled || !user) return
       setSellerId(user.id)
-      await fetchOrders(user.id)
+      setLoading(true)
+      await Promise.all([fetchOrdersPage(user.id, 0, true), fetchStatCounts(user.id)])
+      setLoading(false)
       channel = supabase
         .channel('orders-realtime')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'orders', filter: `seller_id=eq.${user.id}` },
-          () => fetchOrders(user.id)
+          () => {
+            fetchOrdersPage(user.id, 0, true)
+            fetchStatCounts(user.id)
+          }
         )
         .subscribe()
     })()
@@ -196,8 +238,21 @@ export default function SellerDashboard() {
     }
   }
 
-  const whatsappBroadcast = () => {
-    const pendingOrders = orders.filter(o => o.status === 'pending')
+  // Рассылка должна уходить всем pending-заказам продавца, а не только тем,
+  // что сейчас подгружены в таблицу (пагинация) — поэтому отдельный запрос.
+  const whatsappBroadcast = async () => {
+    if (!sellerId) return
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, order_number, client_phone')
+      .eq('seller_id', sellerId)
+      .eq('status', 'pending')
+    if (error) {
+      console.error(error)
+      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
+      return
+    }
+    const pendingOrders = data || []
     if (pendingOrders.length === 0) {
       alert(t('noOrdersForBroadcast'))
       return
@@ -214,13 +269,28 @@ export default function SellerDashboard() {
 
   const distributeOrders = async () => {
     if (!sellerId) return
-    const pendingOrders = orders.filter(o => o.status === 'pending' && !o.courier_name)
-    if (pendingOrders.length === 0) {
-      alert(t('noOrdersForDistribution'))
+    setDistributing(true)
+
+    // Распределять нужно все pending-заказы без курьера, а не только видимую
+    // страницу — поэтому отдельный запрос, а не фильтр по состоянию orders.
+    const { data: pendingOrdersData, error: pendingError } = await supabase
+      .from('orders')
+      .select('id, order_number, client_phone')
+      .eq('seller_id', sellerId)
+      .eq('status', 'pending')
+      .is('courier_name', null)
+    if (pendingError) {
+      console.error(pendingError)
+      setToast({ message: t('loadErrorPrefix') + pendingError.message, type: 'error' })
+      setDistributing(false)
       return
     }
-
-    setDistributing(true)
+    const pendingOrders = pendingOrdersData || []
+    if (pendingOrders.length === 0) {
+      alert(t('noOrdersForDistribution'))
+      setDistributing(false)
+      return
+    }
 
     const courierIds = await getSellerCourierIds(sellerId)
     if (courierIds.length === 0) {
@@ -246,7 +316,7 @@ export default function SellerDashboard() {
     }
 
     let hadError = false
-    const distributed: Order[] = []
+    const distributed: typeof pendingOrders = []
     for (let i = 0; i < pendingOrders.length; i++) {
       const courier = couriersData[i % couriersData.length]
       const { error } = await supabase
@@ -311,12 +381,6 @@ export default function SellerDashboard() {
     }
   }
 
-  const statCounts: Record<OrderStatus, number> = {
-    pending:    orders.filter(o => o.status === 'pending').length,
-    in_transit: orders.filter(o => o.status === 'in_transit').length,
-    delivered:  orders.filter(o => o.status === 'delivered').length,
-  }
-
   const STAT_CARDS = [
     { key: 'pending' as OrderStatus,    icon: Package,     color: 'text-amber-600', border: 'border-amber-100', iconBg: 'bg-amber-50' },
     { key: 'in_transit' as OrderStatus, icon: Truck,       color: 'text-blue-600',  border: 'border-blue-100',  iconBg: 'bg-blue-50' },
@@ -370,6 +434,28 @@ export default function SellerDashboard() {
     setUploading(false)
     setPhotoOrder(null)
     refreshOrders()
+  }
+
+  async function submitReturnRequest() {
+    if (!returnOrder || !sellerId) return
+    const reason = returnReason.trim()
+    if (!reason) {
+      setToast({ message: t('returnReasonRequiredMsg'), type: 'error' })
+      return
+    }
+    setSubmittingReturn(true)
+    const { error } = await supabase
+      .from('return_requests')
+      .insert({ order_id: returnOrder.id, seller_id: sellerId, reason })
+    setSubmittingReturn(false)
+    if (error) {
+      console.error(error)
+      setToast({ message: t('saveErrorGeneric'), type: 'error' })
+      return
+    }
+    setToast({ message: t('returnRequestSentMsg'), type: 'success' })
+    setReturnOrder(null)
+    setReturnReason('')
   }
 
   return (
@@ -539,6 +625,7 @@ export default function SellerDashboard() {
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('date')}</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">WA</th>
                   <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">📷</th>
+                  <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('returns')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -606,6 +693,18 @@ export default function SellerDashboard() {
                         📷
                       </button>
                     </td>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => {
+                          setReturnOrder(order)
+                          setReturnReason('')
+                        }}
+                        className="text-gray-400 hover:text-red-600 transition-colors"
+                        title={t('requestReturnBtn')}
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    </td>
                   </tr>
                   )
                 })}
@@ -614,9 +713,24 @@ export default function SellerDashboard() {
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mt-3 font-medium">
-          {t('shown')} {filtered.length} {t('of')} {orders.length} {t('orders')}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
+          <p className="text-xs text-gray-400 font-medium">
+            {t('shown')} {filtered.length} {t('of')}{' '}
+            {filterStatus === 'all'
+              ? statCounts.pending + statCounts.in_transit + statCounts.delivered
+              : statCounts[filterStatus]}{' '}
+            {t('orders')}
+          </p>
+          {hasMore && (
+            <button
+              onClick={loadMoreOrders}
+              disabled={loadingMore}
+              className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline disabled:opacity-50"
+            >
+              {loadingMore ? t('loading') : t('loadMoreBtn')}
+            </button>
+          )}
+        </div>
 
         {/* Мини-карта заказов */}
         <div className="mt-6 bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
@@ -658,6 +772,45 @@ export default function SellerDashboard() {
                 disabled={uploading}
               />
             </label>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка заявки на возврат */}
+      {returnOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setReturnOrder(null)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-96 max-w-[90vw] max-h-[90vh] overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold mb-3">{t('requestReturnModalTitle')} — {returnOrder.order_number}</h3>
+            <p className="text-xs text-gray-400 mb-1">{t('returnReasonLabel')}</p>
+            <textarea
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              placeholder={t('returnReasonPlaceholder')}
+              rows={4}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-400"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={submitReturnRequest}
+                disabled={submittingReturn}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
+              >
+                {submittingReturn ? t('saving') : t('requestReturnBtn')}
+              </button>
+              <button
+                onClick={() => setReturnOrder(null)}
+                disabled={submittingReturn}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
+              >
+                {t('cancel')}
+              </button>
+            </div>
           </div>
         </div>
       )}

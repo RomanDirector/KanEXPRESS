@@ -118,6 +118,7 @@ function CourierStatsContent() {
         .from('orders')
         .select('id, order_number, client_address, client_phone, courier_stage, courier_fee, seller_id, status, created_at')
         .eq('courier_name', courier.full_name)
+        .eq('is_kaspi_delivery', false)
 
       if (error) console.error(error.message)
       else setOrders(data as Order[])
