@@ -3,9 +3,15 @@
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
+import { assignZonesToOrders } from '@/lib/zones'
 import type { MapZone } from '@/components/MapGL'
+import type { OrderPoint } from '@/components/ZoneMapEditor'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
+const ZoneMapEditor = dynamic(() => import('@/components/ZoneMapEditor'), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center h-96 text-gray-400">Загрузка карты…</div>,
+})
 
 interface CourierOption {
   id: string
@@ -18,35 +24,41 @@ interface ZoneRow {
   color: string
   coordinates: GeoJSON.Polygon
   display_number: number | null
+  zone_group_id: string
   seller_id: string
   organization_name: string | null
   courier_id: string | null
 }
 
+interface SellerOption {
+  id: string
+  organization_name: string | null
+}
+
 export default function AdminZonesPage() {
   const [zones, setZones] = useState<ZoneRow[]>([])
   const [couriers, setCouriers] = useState<CourierOption[]>([])
+  const [sellers, setSellers] = useState<SellerOption[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
 
+  const [allOrders, setAllOrders] = useState<OrderPoint[]>([])
+  const [assigning, setAssigning] = useState(false)
+  const [assignResult, setAssignResult] = useState<string | null>(null)
+
   async function loadAll() {
     setLoading(true)
     setLoadError(null)
-    // Отдельные запросы вместо embed-джойнов (zones -> sellers, zones -> courier_zones):
-    // как и для courier_zones ниже, embed завязан на relationship-кэш PostgREST,
-    // а зона <-> продавец через такой join нигде больше в проекте не читается —
-    // при отсутствующей/незакэшированной связи весь select падает и страница
-    // молча показывает "Зоны не найдены" вместо реальной ошибки.
     const [
       { data: zonesData, error: zonesError },
       { data: sellersData, error: sellersError },
       { data: czData, error: czError },
       { data: couriersData, error: couriersError },
     ] = await Promise.all([
-      supabase.from('zones').select('id, name, color, coordinates, display_number, seller_id').order('name'),
-      supabase.from('sellers').select('id, organization_name'),
+      supabase.from('zones').select('id, name, color, coordinates, display_number, zone_group_id, seller_id').order('name'),
+      supabase.from('sellers').select('id, organization_name').order('organization_name'),
       supabase.from('courier_zones').select('zone_id, courier_id'),
       supabase.from('couriers').select('id, full_name').eq('access_status', 'approved').order('full_name'),
     ])
@@ -64,7 +76,7 @@ export default function AdminZonesPage() {
     }
 
     const orgBySeller = new Map<string, string | null>()
-    for (const row of (sellersData || []) as { id: string; organization_name: string | null }[]) {
+    for (const row of (sellersData || []) as SellerOption[]) {
       orgBySeller.set(row.id, row.organization_name)
     }
 
@@ -81,6 +93,7 @@ export default function AdminZonesPage() {
 
     setZones(rows)
     setCouriers((couriersData || []) as CourierOption[])
+    setSellers((sellersData || []) as SellerOption[])
     setLoading(false)
   }
 
@@ -88,6 +101,58 @@ export default function AdminZonesPage() {
     loadAll()
   }, [])
 
+  // Точки заказов ВСЕХ продавцов — просто справочный слой поверх карты,
+  // пока админ рисует зону, которая всё равно применяется сразу ко всем.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_number, client_address, lat, lng, status')
+      if (error) {
+        console.error(error.message)
+        return
+      }
+      if (cancelled) return
+      const points = (data || [])
+        .filter((o: any) => o.lat != null && o.lng != null)
+        .map((o: any) => ({
+          id: o.id,
+          order_number: o.order_number,
+          client_address: o.client_address,
+          lat: o.lat,
+          lng: o.lng,
+          status: o.status,
+        }))
+      setAllOrders(points)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Зоны теперь общие для всех продавцов — распределяем заказы по зонам
+  // разом за каждого продавца, а не за одного выбранного.
+  async function handleAssign() {
+    setAssigning(true)
+    setAssignResult(null)
+    let totalAssigned = 0
+    let totalUnassigned = 0
+    for (const s of sellers) {
+      const { assigned, unassigned } = await assignZonesToOrders(s.id)
+      totalAssigned += assigned
+      totalUnassigned += unassigned
+    }
+    setAssigning(false)
+    setAssignResult(`Распределено: ${totalAssigned}, не распределено: ${totalUnassigned}`)
+    loadAll()
+  }
+
+  // Номер зоны общий для всей группы (одна логическая зона = N строк zones,
+  // по одной на продавца, см. ZoneMapEditor) — правим через zone_group_id,
+  // тем же паттерном, что уже применяется для координат/названия полигона,
+  // а не по id одной строки, иначе у разных продавцов разъедутся номера на
+  // одной и той же зоне.
   async function saveDisplayNumber(zoneId: string) {
     const raw = numberDrafts[zoneId]
     if (raw === undefined) return
@@ -96,15 +161,20 @@ export default function AdminZonesPage() {
       alert('Номер зоны должен быть положительным числом')
       return
     }
+    const zone = zones.find((z) => z.id === zoneId)
+    if (!zone) return
     setSavingId(zoneId)
-    const { error } = await supabase.from('zones').update({ display_number: value }).eq('id', zoneId)
+    const { error } = await supabase
+      .from('zones')
+      .update({ display_number: value })
+      .eq('zone_group_id', zone.zone_group_id)
     setSavingId(null)
     if (error) {
       console.error(error)
       alert(error.code === '23505' ? 'Этот номер уже занят другой зоной' : 'Ошибка сохранения: ' + error.message)
       return
     }
-    setZones((prev) => prev.map((z) => (z.id === zoneId ? { ...z, display_number: value } : z)))
+    setZones((prev) => prev.map((z) => (z.zone_group_id === zone.zone_group_id ? { ...z, display_number: value } : z)))
     setNumberDrafts((prev) => {
       const next = { ...prev }
       delete next[zoneId]
@@ -114,8 +184,6 @@ export default function AdminZonesPage() {
 
   async function assignCourier(zoneId: string, courierId: string) {
     setSavingId(zoneId)
-    // Unique-индекс на courier_zones.zone_id — одна зона = один курьер,
-    // поэтому сначала снимаем старую привязку, потом ставим новую.
     const { error: delError } = await supabase.from('courier_zones').delete().eq('zone_id', zoneId)
     if (delError) {
       console.error(delError)
@@ -134,6 +202,18 @@ export default function AdminZonesPage() {
     }
     setSavingId(null)
     setZones((prev) => prev.map((z) => (z.id === zoneId ? { ...z, courier_id: courierId || null } : z)))
+  }
+
+  async function deleteZone(zoneId: string) {
+    if (!confirm('Удалить зону?')) return
+    setSavingId(zoneId)
+    const { error } = await supabase.from('zones').delete().eq('id', zoneId)
+    setSavingId(null)
+    if (error) {
+      alert('Ошибка удаления: ' + error.message)
+      return
+    }
+    setZones((prev) => prev.filter((z) => z.id !== zoneId))
   }
 
   const mapZones: MapZone[] = zones.map((z) => ({
@@ -171,6 +251,7 @@ export default function AdminZonesPage() {
                     <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Продавец</th>
                     <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">№</th>
                     <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Курьер</th>
+                    <th className="px-5 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -209,6 +290,15 @@ export default function AdminZonesPage() {
                           ))}
                         </select>
                       </td>
+                      <td className="px-5 py-4">
+                        <button
+                          onClick={() => deleteZone(z.id)}
+                          disabled={savingId === z.id}
+                          className="text-xs font-semibold text-red-500 hover:text-red-700 disabled:opacity-50"
+                        >
+                          Удалить
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -216,6 +306,27 @@ export default function AdminZonesPage() {
             </div>
           </div>
         )}
+
+        {/* Рисование новой зоны + распределение заказов по зонам — сразу для всех продавцов */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-b border-gray-100">
+            <div>
+              <h2 className="text-sm font-bold text-gray-900">Нарисовать новую зону</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Зона рисуется один раз на карте и сразу применяется ко всем продавцам</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {assignResult && <span className="text-sm text-green-600 font-semibold">{assignResult}</span>}
+              <button
+                onClick={handleAssign}
+                disabled={assigning}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50 text-sm whitespace-nowrap"
+              >
+                {assigning ? 'Определяю…' : 'Определить районы заказов'}
+              </button>
+            </div>
+          </div>
+          <ZoneMapEditor orders={allOrders} />
+        </div>
       </main>
     </div>
   )

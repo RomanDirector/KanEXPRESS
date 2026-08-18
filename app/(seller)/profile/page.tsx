@@ -18,6 +18,9 @@ interface SellerData {
   notifications_enabled: boolean
   avatar_url: string | null
   company_logo_url: string | null
+  warehouse_address: string | null
+  warehouse_lat: number | null
+  warehouse_lng: number | null
 }
 
 const MAX_LOGO_SIZE_BYTES = 2 * 1024 * 1024
@@ -105,6 +108,11 @@ export default function ProfilePage() {
   const [kaspiLoading, setKaspiLoading] = useState(true)
   const [kaspiSaving, setKaspiSaving] = useState(false)
 
+  const [warehouseAddress, setWarehouseAddress] = useState('')
+  const [warehouseCoords, setWarehouseCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [savingWarehouse, setSavingWarehouse] = useState(false)
+  const [warehouseSaved, setWarehouseSaved] = useState(false)
+
   useEffect(() => {
     load()
     loadKaspiCredentials()
@@ -167,7 +175,7 @@ export default function ProfilePage() {
     ] = await Promise.all([
       supabase
         .from('sellers')
-        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled, avatar_url, company_logo_url')
+        .select('full_name, phone, email, organization_name, organization_address, notifications_enabled, avatar_url, company_logo_url, warehouse_address, warehouse_lat, warehouse_lng')
         .eq('id', user.id)
         .single(),
       supabase
@@ -193,6 +201,12 @@ export default function ProfilePage() {
     }
 
     setSeller(sellerData as SellerData)
+    setWarehouseAddress((sellerData as SellerData)?.warehouse_address || '')
+    setWarehouseCoords(
+      (sellerData as SellerData)?.warehouse_lat != null && (sellerData as SellerData)?.warehouse_lng != null
+        ? { lat: (sellerData as SellerData).warehouse_lat as number, lng: (sellerData as SellerData).warehouse_lng as number }
+        : null
+    )
     setSubscription({
       plan: subData?.plan === 'pro' ? 'pro' : 'free',
       expires_at: subData?.expires_at ?? null,
@@ -206,6 +220,47 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const saveWarehouseAddress = async () => {
+    if (!userId) return
+    const trimmed = warehouseAddress.trim()
+    if (!trimmed) {
+      setToast({ message: t('saveErrorGeneric'), type: 'error' })
+      return
+    }
+
+    setSavingWarehouse(true)
+    setWarehouseSaved(false)
+
+    const res = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: trimmed }),
+    })
+    const result = await res.json()
+
+    if (!result.success) {
+      setSavingWarehouse(false)
+      setToast({ message: t('saveErrorPrefix') + (result.error || ''), type: 'error' })
+      return
+    }
+
+    const { error } = await supabase
+      .from('sellers')
+      .update({ warehouse_address: trimmed, warehouse_lat: result.lat, warehouse_lng: result.lng })
+      .eq('id', userId)
+
+    setSavingWarehouse(false)
+
+    if (error) {
+      setToast({ message: t('saveErrorPrefix') + error.message, type: 'error' })
+      return
+    }
+
+    setWarehouseCoords({ lat: result.lat, lng: result.lng })
+    setWarehouseSaved(true)
+    setTimeout(() => setWarehouseSaved(false), 3000)
   }
 
   function startEditing() {
@@ -825,6 +880,30 @@ export default function ProfilePage() {
                 }`}
               />
             </button>
+          </div>
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <p className="text-sm text-gray-700 mb-2">{t('warehouseLabel')}</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="text"
+                value={warehouseAddress}
+                onChange={(e) => setWarehouseAddress(e.target.value)}
+                placeholder={t('organizationAddressLabel')}
+                className="flex-1 min-w-[220px] border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+              />
+              <button
+                onClick={saveWarehouseAddress}
+                disabled={savingWarehouse}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-all"
+              >
+                {savingWarehouse ? t('saving') : t('save')}
+              </button>
+            </div>
+            {warehouseCoords && (
+              <p className={`text-xs mt-1 ${warehouseSaved ? 'text-green-600' : 'text-gray-400'}`}>
+                {warehouseCoords.lat.toFixed(5)}, {warehouseCoords.lng.toFixed(5)}
+              </p>
+            )}
           </div>
         </div>
 

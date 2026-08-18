@@ -8,8 +8,27 @@ import { MapPin, Package, Truck, CheckCircle, RotateCcw, Ban, X, ArrowLeft } fro
 import { useLang } from '@/lib/i18n'
 import { Toast } from '@/components/Toast'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
+import { getSellerCourierIds } from '@/lib/couriers'
+import type { MapZone } from '@/components/MapGL'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
+
+function TrackingMapLoading() {
+  const { t } = useLang()
+  return <div className="flex items-center justify-center h-96 text-gray-400">{t('loading')}</div>
+}
+
+const CourierTrackingMap = dynamic(() => import('@/components/CourierTrackingMap'), {
+  ssr: false,
+  loading: () => <TrackingMapLoading />,
+})
+
+interface CourierWithOrders {
+  id: string
+  full_name: string
+  phone: string
+  orders: { id: string; order_number: string; client_address: string }[]
+}
 
 interface Order {
   id: string
@@ -56,11 +75,56 @@ const ALL_STAGES = Object.keys(STAGE_LABEL) as DisplayStage[]
 
 export default function MapPage() {
   const { t } = useLang()
+  const [view, setView] = useState<'orders' | 'couriers'>('orders')
   const [orders, setOrders] = useState<Order[]>([])
+  const [zones, setZones] = useState<MapZone[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [couriers, setCouriers] = useState<CourierWithOrders[]>([])
+  const [couriersLoading, setCouriersLoading] = useState(true)
+  const [courierListTab, setCourierListTab] = useState<'map' | 'list'>('map')
+
+  useEffect(() => {
+    async function loadCouriers() {
+      setCouriersLoading(true)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        setCouriersLoading(false)
+        return
+      }
+      const courierIds = await getSellerCourierIds(user.id)
+      const { data: courierRows, error: courierErr } =
+        courierIds.length === 0
+          ? { data: [] as { id: string; full_name: string; phone: string }[], error: null }
+          : await supabase.from('couriers').select('id, full_name, phone').in('id', courierIds)
+      const { data: orderRows, error: orderErr } = await supabase
+        .from('orders')
+        .select('id, order_number, client_address, courier_name, status')
+        .eq('seller_id', user.id)
+        .eq('status', 'in_transit')
+      if (courierErr || orderErr) {
+        if (courierErr) console.error(courierErr)
+        if (orderErr) console.error(orderErr)
+        setToast({ message: t('loadErrorPrefix') + (courierErr?.message || orderErr?.message), type: 'error' })
+      }
+
+      const result: CourierWithOrders[] = (courierRows || []).map((c: any) => ({
+        id: c.id,
+        full_name: c.full_name,
+        phone: c.phone,
+        orders: (orderRows || []).filter((o: any) => o.courier_name === c.full_name),
+      }))
+
+      setCouriers(result)
+      setCouriersLoading(false)
+    }
+    loadCouriers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const STAGE_LABEL_LOCAL: Record<DisplayStage, string> = {
     not_started: t('stageNotStarted'),
@@ -94,6 +158,23 @@ export default function MapPage() {
       setLoading(false)
     }
     fetchOrders()
+
+    const fetchZones = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const { data, error } = await supabase
+        .from('zones')
+        .select('id, name, color, coordinates')
+        .eq('seller_id', user.id)
+      if (error) {
+        console.error(error.message)
+        return
+      }
+      setZones((data || []) as MapZone[])
+    }
+    fetchZones()
   }, [])
 
   // Escape снимает выделение заказа (закрывает попап), пока пользователь не
@@ -144,20 +225,103 @@ export default function MapPage() {
           <p className="text-sm text-gray-400 mt-0.5">{t('mapSub')}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-            {ALL_STAGES.map((s) => (
-              <span key={s} className="flex items-center gap-1">
-                <span
-                  className="w-3 h-3 rounded-full inline-block"
-                  style={{ backgroundColor: STAGE_MARKER_COLOR[s] }}
-                />
-                {STAGE_LABEL_LOCAL[s]}
-              </span>
-            ))}
+          <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+            <button
+              onClick={() => setView('orders')}
+              className={`px-4 py-2 text-sm font-bold transition-all ${view === 'orders' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            >
+              {t('ordersNav')}
+            </button>
+            <button
+              onClick={() => setView('couriers')}
+              className={`px-4 py-2 text-sm font-bold transition-all ${view === 'couriers' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+            >
+              {t('tracking')}
+            </button>
           </div>
+          {view === 'orders' && (
+            <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+              {ALL_STAGES.map((s) => (
+                <span key={s} className="flex items-center gap-1">
+                  <span
+                    className="w-3 h-3 rounded-full inline-block"
+                    style={{ backgroundColor: STAGE_MARKER_COLOR[s] }}
+                  />
+                  {STAGE_LABEL_LOCAL[s]}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </header>
 
+      {view === 'couriers' && (
+        <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
+          <div className="flex rounded-xl border overflow-hidden w-fit mb-4">
+            <button
+              onClick={() => setCourierListTab('map')}
+              className={`px-4 py-2 text-sm font-bold ${courierListTab === 'map' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}
+            >
+              {t('map')}
+            </button>
+            <button
+              onClick={() => setCourierListTab('list')}
+              className={`px-4 py-2 text-sm font-bold ${courierListTab === 'list' ? 'bg-red-600 text-white' : 'bg-white text-gray-500'}`}
+            >
+              {t('list')}
+            </button>
+          </div>
+
+          {!couriersLoading && couriers.length === 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4 text-center shadow-sm">
+              <p className="text-sm text-gray-500">{t('trackingNoCouriersMsg')}</p>
+            </div>
+          )}
+
+          {courierListTab === 'map' && <CourierTrackingMap />}
+
+          {courierListTab === 'list' && (
+            <div className="space-y-4">
+              {couriersLoading && <p className="text-gray-400">{t('loading')}</p>}
+              {couriers.map((c) => (
+                <div key={c.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="font-bold">{c.full_name}</span>
+                      <span className="text-gray-400 ml-3 text-sm">{c.phone}</span>
+                    </div>
+                    <span className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-full font-bold">
+                      {t('inTransitCount').replace('{count}', String(c.orders.length))}
+                    </span>
+                  </div>
+                  {c.orders.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-400 text-xs uppercase">
+                            <th className="py-1 pr-4">#</th>
+                            <th className="py-1">{t('address')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {c.orders.map((o) => (
+                            <tr key={o.id} className="border-t border-gray-50">
+                              <td className="py-1.5 pr-4 font-mono font-bold text-gray-900">{o.order_number}</td>
+                              <td className="py-1.5 text-gray-500">{o.client_address}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      )}
+
+      {view === 'orders' && (
       <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {/* Фильтр статусов */}
         <div className="flex items-center gap-2 mb-4">
@@ -199,6 +363,7 @@ export default function MapPage() {
               <div className="h-[60vh] md:h-[600px]">
                 <MapGL
                   points={mapPoints}
+                  zones={zones}
                   height="100%"
                   selectedId={selectedOrder?.id ?? null}
                   onPointClick={handlePointClick}
@@ -313,6 +478,7 @@ export default function MapPage() {
           </div>
         )}
       </main>
+      )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>

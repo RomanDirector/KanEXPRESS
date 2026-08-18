@@ -6,7 +6,6 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import 'leaflet-draw';
 import { supabase } from '@/lib/supabase';
-import { useLang } from '@/lib/i18n';
 import { Toast } from '@/components/Toast';
 import { buildWarehouseIcon } from '@/lib/map-icons';
 
@@ -23,15 +22,23 @@ const PALETTE = [
   '#8b5cf6', '#ec4899', '#14b8a6', '#f97316',
 ];
 
+// Одна "визуальная" зона на карте = N строк zones (по одной на продавца) с
+// одинаковыми coordinates/name/color и общим zone_group_id (см. миграцию
+// 2026-08-shared-zones.sql). Компонент читает/пишет всегда по группе, а не
+// по id конкретной строки — так правки на карте применяются сразу ко всем
+// продавцам.
 interface ZoneRow {
   id: string;
   name: string;
   color: string;
   coordinates: GeoJSON.Polygon;
+  display_number: number | null;
+  zone_group_id: string;
+  created_at: string;
 }
 
 interface ZoneMeta {
-  id: string;
+  groupId: string;
   name: string;
 }
 
@@ -59,11 +66,11 @@ function escapeHtml(s: string) {
     .replace(/"/g, '&quot;');
 }
 
-function buildPopupHtml(zoneId: string, name: string, deleteLabel: string) {
+function buildPopupHtml(groupId: string, name: string, deleteLabel: string) {
   return `
     <div style="min-width:160px">
       <b>${escapeHtml(name)}</b><br/>
-      <button data-delete-zone="${zoneId}"
+      <button data-delete-zone="${groupId}"
         style="margin-top:6px;background:#dc2626;color:#fff;border:none;
         padding:5px 12px;border-radius:6px;font-weight:600;cursor:pointer">
         ${escapeHtml(deleteLabel)}</button>
@@ -111,16 +118,24 @@ function cellToGeoJSON(cell: [number, number][]): GeoJSON.Polygon {
   return { type: 'Polygon', coordinates: [ring] };
 }
 
+// Единственный вызывающий — app/admin/zones, где весь остальной UI
+// захардкожен на русском (админ-панель не многоязычная, см.
+// app/admin/layout.tsx) — поэтому здесь тоже прямые русские строки вместо
+// useLang()/t(): раньше компонент жил и на многоязычной странице продавца,
+// но с переносом в админку прежние переводы стали недостижимы, а обёртка
+// в LangProvider ради одного компонента рисковала протащить в админку
+// казахский язык из localStorage, оставшийся от сессии продавца в том же
+// браузере. Зона всегда общая для всех продавцов: рисуется/редактируется
+// один раз, а под капотом это N строк zones (по одной на продавца, см.
+// buildInsertRows) с общим zone_group_id.
 export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }) {
-  const { t } = useLang();
   const mapRef = useRef<L.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const orderLayerRef = useRef<L.LayerGroup | null>(null);
-  const warehouseMarkerRef = useRef<L.Marker | null>(null);
+  const warehouseMarkersRef = useRef<L.Marker[]>([]);
   const drawControlRef = useRef<any>(null);
   const polygonHandlerRef = useRef<any>(null);
-  const sellerIdRef = useRef<string | null>(null);
 
   const zoneLayersRef = useRef<Map<string, L.Polygon>>(new Map());
   const layerMetaRef = useRef<Map<number, ZoneMeta>>(new Map());
@@ -134,6 +149,20 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   function setZonesCount(updater: (c: number) => number) {
     zonesCountRef.current = updater(zonesCountRef.current);
     setZonesCountState(zonesCountRef.current);
+  }
+
+  // Строки для bulk-insert новой/пересозданной группы — одна строка на
+  // каждого существующего продавца, все с одним zone_group_id.
+  async function buildInsertRows(groupId: string, name: string, coordinates: GeoJSON.Polygon, color: string) {
+    const { data: sellersData, error } = await supabase.from('sellers').select('id');
+    if (error || !sellersData || sellersData.length === 0) return null;
+    return sellersData.map((s: { id: string }) => ({
+      seller_id: s.id,
+      name,
+      coordinates,
+      color,
+      zone_group_id: groupId,
+    }));
   }
 
   useEffect(() => {
@@ -195,9 +224,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     }
 
     (async () => {
-      await getSellerId();
       await loadExistingZones();
-      await loadWarehouseMarker();
+      await loadWarehouseMarkers();
     })();
 
     map.on((L as any).Draw.Event.DRAWSTART, (e: any) => {
@@ -215,42 +243,34 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     map.on((L as any).Draw.Event.CREATED, async (e: any) => {
       const layer = e.layer as L.Polygon;
 
-      const name = window.prompt(t('zoneNamePromptLabel'));
+      const name = window.prompt('Название зоны:');
       if (!name || !name.trim()) return;
       const trimmed = name.trim();
 
-      const sellerId = await getSellerId();
-      if (!sellerId) {
-        alert(t('resolveSellerErrorMsg'));
+      const geojson = (layer.toGeoJSON() as any).geometry;
+      const color = PALETTE[zonesCountRef.current % PALETTE.length];
+      const groupId = crypto.randomUUID();
+
+      const rows = await buildInsertRows(groupId, trimmed, geojson, color);
+      if (!rows) {
+        alert('Не удалось создать зону: в системе нет ни одного продавца');
         return;
       }
 
-      const geojson = (layer.toGeoJSON() as any).geometry;
-      const color = PALETTE[zonesCountRef.current % PALETTE.length];
+      const { error } = await supabase.from('zones').insert(rows);
 
-      const { data, error } = await supabase
-        .from('zones')
-        .insert({
-          seller_id: sellerId,
-          name: trimmed,
-          coordinates: geojson,
-          color,
-        })
-        .select('id')
-        .single();
-
-      if (error || !data) {
+      if (error) {
         console.error('Ошибка сохранения зоны:', error);
-        alert(t('zoneSaveErrorPrefix') + (error?.message || 'unknown'));
+        alert('Ошибка сохранения зоны: ' + error.message);
         return;
       }
 
       layer.setStyle({ color, weight: 2, fillOpacity: 0.35 });
       drawnItems.addLayer(layer);
-      zoneLayersRef.current.set(data.id, layer);
-      attachZoneInteractions(layer, data.id, trimmed);
+      zoneLayersRef.current.set(groupId, layer);
+      attachZoneInteractions(layer, groupId, trimmed);
       setZonesCount((c) => c + 1);
-      setToast({ message: t('zoneSavedMsg'), type: 'success' });
+      setToast({ message: 'Зона успешно сохранена', type: 'success' });
     });
 
     map.on((L as any).Draw.Event.EDITED, (e: any) => {
@@ -259,13 +279,11 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         const meta = layerMetaRef.current.get(L.Util.stamp(layer));
         if (!meta) return;
         const geojson = layer.toGeoJSON().geometry;
-        const ownerId = await getSellerId();
         const { error } = await supabase
           .from('zones')
           .update({ coordinates: geojson })
-          .eq('id', meta.id)
-          .eq('seller_id', ownerId ?? '');
-        if (error) alert(t('zoneChangesSaveErrorPrefix') + error.message);
+          .eq('zone_group_id', meta.groupId);
+        if (error) alert('Ошибка сохранения изменений: ' + error.message);
       });
     });
 
@@ -275,18 +293,16 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         const stamp = L.Util.stamp(layer);
         const meta = layerMetaRef.current.get(stamp);
         if (!meta) return;
-        const ownerId = await getSellerId();
         const { error } = await supabase
           .from('zones')
           .delete()
-          .eq('id', meta.id)
-          .eq('seller_id', ownerId ?? '');
+          .eq('zone_group_id', meta.groupId);
         if (error) {
-          alert(t('zonesDeleteError') + error.message);
+          alert('Ошибка удаления: ' + error.message);
           return;
         }
         layerMetaRef.current.delete(stamp);
-        zoneLayersRef.current.delete(meta.id);
+        zoneLayersRef.current.delete(meta.groupId);
         setZonesCount((c) => Math.max(0, c - 1));
       });
     });
@@ -296,8 +312,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       const btn = el?.querySelector('[data-delete-zone]') as HTMLElement | null;
       if (btn) {
         btn.onclick = () => {
-          const zoneId = btn.getAttribute('data-delete-zone')!;
-          deleteZone(zoneId);
+          const groupId = btn.getAttribute('data-delete-zone')!;
+          deleteZone(groupId);
         };
       }
     });
@@ -309,7 +325,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       // в dev монтирует эффект дважды) — без сброса следующий рендер добавлял бы
       // маркеры в уже уничтоженный, отвязанный от карты layerGroup.
       orderLayerRef.current = null;
-      warehouseMarkerRef.current = null;
+      warehouseMarkersRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -341,88 +357,86 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     });
   }, [orders]);
 
-  function attachZoneInteractions(layer: L.Polygon, zoneId: string, name: string) {
-    layerMetaRef.current.set(L.Util.stamp(layer), { id: zoneId, name });
+  function attachZoneInteractions(layer: L.Polygon, groupId: string, name: string) {
+    layerMetaRef.current.set(L.Util.stamp(layer), { groupId, name });
     layer.bindTooltip(name, { direction: 'center', className: 'zone-tooltip' });
-    layer.bindPopup(buildPopupHtml(zoneId, name, t('deleteZoneFullBtn')));
+    layer.bindPopup(buildPopupHtml(groupId, name, '🗑 Удалить зону'));
 
     layer.on('dblclick', (e: any) => {
       L.DomEvent.stop(e);
       const meta = layerMetaRef.current.get(L.Util.stamp(layer));
       if (!meta) return;
-      const newName = window.prompt(t('newZoneNamePromptLabel'), meta.name);
+      const newName = window.prompt('Новое название зоны:', meta.name);
       if (newName === null) return;
       const trimmed = newName.trim();
       if (!trimmed || trimmed === meta.name) return;
-      renameZone(layer, meta.id, trimmed);
+      renameZone(layer, meta.groupId, trimmed);
     });
   }
 
-  async function getSellerId(): Promise<string | null> {
-    if (sellerIdRef.current) return sellerIdRef.current;
-    const { data } = await supabase.auth.getUser();
-    sellerIdRef.current = data?.user?.id ?? null;
-    return sellerIdRef.current;
-  }
-
-  async function renameZone(layer: L.Polygon, zoneId: string, newName: string) {
-    const ownerId = await getSellerId();
+  async function renameZone(layer: L.Polygon, groupId: string, newName: string) {
     const { error } = await supabase
       .from('zones')
       .update({ name: newName })
-      .eq('id', zoneId)
-      .eq('seller_id', ownerId ?? '');
+      .eq('zone_group_id', groupId);
     if (error) {
-      alert(t('zoneRenameErrorPrefix') + error.message);
+      alert('Ошибка переименования: ' + error.message);
       return;
     }
-    layerMetaRef.current.set(L.Util.stamp(layer), { id: zoneId, name: newName });
+    layerMetaRef.current.set(L.Util.stamp(layer), { groupId, name: newName });
     layer.setTooltipContent(newName);
-    layer.setPopupContent(buildPopupHtml(zoneId, newName, t('deleteZoneFullBtn')));
+    layer.setPopupContent(buildPopupHtml(groupId, newName, '🗑 Удалить зону'));
   }
 
-  async function deleteZone(zoneId: string) {
-    if (!window.confirm(t('deleteZoneSimpleConfirm'))) return;
+  async function deleteZone(groupId: string) {
+    if (!window.confirm('Удалить эту зону?')) return;
 
-    const ownerId = await getSellerId();
     const { error } = await supabase
       .from('zones')
       .delete()
-      .eq('id', zoneId)
-      .eq('seller_id', ownerId ?? '');
+      .eq('zone_group_id', groupId);
     if (error) {
-      alert(t('zonesDeleteError') + error.message);
+      alert('Ошибка удаления: ' + error.message);
       return;
     }
 
-    const layer = zoneLayersRef.current.get(zoneId);
+    const layer = zoneLayersRef.current.get(groupId);
     if (layer) {
       drawnItemsRef.current?.removeLayer(layer);
       layerMetaRef.current.delete(L.Util.stamp(layer));
-      zoneLayersRef.current.delete(zoneId);
+      zoneLayersRef.current.delete(groupId);
     }
     setZonesCount((c) => Math.max(0, c - 1));
   }
 
+  // Одна логическая зона может иметь несколько строк zones (по одной на
+  // продавца, все с одинаковыми coordinates/name/color) — рисуем один
+  // полигон на zone_group_id, беря самую раннюю строку группы как образец.
   async function loadExistingZones() {
     const drawnItems = drawnItemsRef.current;
     if (!drawnItems) return;
 
     const { data, error } = await supabase
       .from('zones')
-      .select('id, name, color, coordinates')
-      .eq('seller_id', sellerIdRef.current)
+      .select('id, name, color, coordinates, display_number, zone_group_id, created_at')
       .order('created_at');
 
     if (error) {
       console.error('Ошибка загрузки зон:', error);
-      setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' });
+      setToast({ message: 'Не удалось загрузить данные: ' + error.message, type: 'error' });
       return;
     }
 
-    const zones = (data || []) as ZoneRow[];
+    const rows = (data || []) as ZoneRow[];
+    const seenGroups = new Set<string>();
+    const groups: ZoneRow[] = [];
+    for (const row of rows) {
+      if (seenGroups.has(row.zone_group_id)) continue;
+      seenGroups.add(row.zone_group_id);
+      groups.push(row);
+    }
 
-    zones.forEach((zone, i) => {
+    groups.forEach((zone, i) => {
       const color = zone.color || PALETTE[i % PALETTE.length];
       try {
         const latlngs = zone.coordinates.coordinates[0].map(
@@ -430,52 +444,48 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         );
         const layer = L.polygon(latlngs, { color, weight: 2, fillOpacity: 0.35 });
         drawnItems.addLayer(layer);
-        zoneLayersRef.current.set(zone.id, layer);
-        attachZoneInteractions(layer, zone.id, zone.name);
+        zoneLayersRef.current.set(zone.zone_group_id, layer);
+        attachZoneInteractions(layer, zone.zone_group_id, zone.name);
       } catch (e) {
         console.error('Не удалось отрисовать зону', zone.name, e);
       }
     });
 
-    setZonesCount(() => zones.length);
+    setZonesCount(() => groups.length);
   }
 
-  // Метка склада продавца — постоянная, не зависит от зон/заказов и никогда
-  // не скрывается фильтрами (их на этой карте и нет, но на всякий случай
-  // держим отдельно от orderLayerRef, который очищается при каждом ре-рендере orders).
-  async function loadWarehouseMarker() {
+  // Метки складов ВСЕХ продавцов — постоянные, не зависят от зон/заказов и
+  // никогда не скрываются фильтрами (их на этой карте и нет). Раньше был один
+  // склад текущего продавца; теперь зона общая для всех, поэтому ориентиры
+  // на карте тоже показываем для всех продавцов сразу.
+  async function loadWarehouseMarkers() {
     const map = mapRef.current;
     if (!map) return;
 
-    const sellerId = await getSellerId();
-    if (!sellerId) return;
-
     const { data, error } = await supabase
       .from('sellers')
-      .select('warehouse_address, warehouse_lat, warehouse_lng')
-      .eq('id', sellerId)
-      .maybeSingle();
+      .select('organization_name, warehouse_address, warehouse_lat, warehouse_lng');
 
     if (error) {
-      console.error('Ошибка загрузки адреса склада:', error);
+      console.error('Ошибка загрузки адресов складов:', error);
       return;
     }
-    if (data?.warehouse_lat == null || data?.warehouse_lng == null) return;
 
-    if (warehouseMarkerRef.current) {
-      map.removeLayer(warehouseMarkerRef.current);
-      warehouseMarkerRef.current = null;
+    warehouseMarkersRef.current.forEach((m) => map.removeLayer(m));
+    warehouseMarkersRef.current = [];
+
+    for (const seller of (data || []) as any[]) {
+      if (seller.warehouse_lat == null || seller.warehouse_lng == null) continue;
+      const marker = L.marker([seller.warehouse_lat, seller.warehouse_lng], {
+        icon: buildWarehouseIcon(),
+        zIndexOffset: 1000,
+      });
+      marker.bindPopup(
+        `<div style="min-width:160px"><b>${escapeHtml(seller.organization_name || 'Склад')}</b><br/>${escapeHtml(seller.warehouse_address || '')}</div>`
+      );
+      marker.addTo(map);
+      warehouseMarkersRef.current.push(marker);
     }
-
-    const marker = L.marker([data.warehouse_lat, data.warehouse_lng], {
-      icon: buildWarehouseIcon(),
-      zIndexOffset: 1000,
-    });
-    marker.bindPopup(
-      `<div style="min-width:160px"><b>${escapeHtml(t('warehouseLabel'))}</b><br/>${escapeHtml(data.warehouse_address || '')}</div>`
-    );
-    marker.addTo(map);
-    warehouseMarkerRef.current = marker;
   }
 
   function finishPolygon() {
@@ -486,30 +496,30 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     if (!handler) {
       console.error('finishPolygon: не найден активный обработчик рисования полигона');
-      alert(t('finishShapeNoHandlerMsg'));
+      alert('Не найден активный инструмент рисования. Попробуйте начать рисовать зону заново.');
       return;
     }
 
     const markerCount = handler._markers ? handler._markers.length : 0;
     if (markerCount < 3) {
-      alert(t('minThreePointsMsg'));
+      alert('Нужно минимум 3 точки, чтобы завершить фигуру');
       return;
     }
     handler.completeShape();
   }
 
   async function autoLayout() {
-    const input = window.prompt(t('gridSizePromptLabel'), '4');
+    const input = window.prompt('Размер сетки зон (N×N):', '4');
     if (input === null) return;
     const n = parseInt(input, 10);
     if (!Number.isFinite(n) || n < 1 || n > 20) {
-      alert(t('invalidGridSizeMsg'));
+      alert('Введите целое число от 1 до 20');
       return;
     }
 
     if (zonesCountRef.current > 0) {
       const ok = window.confirm(
-        t('overwriteZonesConfirmMsg').replace('{count}', String(zonesCountRef.current))
+        `Уже есть сохранённые зоны (${zonesCountRef.current}). Авторазметка удалит их все и создаст новую сетку. Продолжить?`
       );
       if (!ok) return;
     }
@@ -517,19 +527,13 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     const drawnItems = drawnItemsRef.current;
     if (!drawnItems) return;
 
-    const sellerId = await getSellerId();
-    if (!sellerId) {
-      alert(t('resolveSellerErrorMsg'));
-      return;
-    }
-
     if (zonesCountRef.current > 0) {
       const { error: delError } = await supabase
         .from('zones')
         .delete()
-        .eq('seller_id', sellerId);
+        .not('id', 'is', null);
       if (delError) {
-        alert(t('deleteOldZonesErrorPrefix') + delError.message);
+        alert('Ошибка удаления старых зон: ' + delError.message);
         return;
       }
       drawnItems.clearLayers();
@@ -542,17 +546,20 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
     let hadError = false;
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
-      const name = t('gridZoneNameTemplate').replace('{number}', String(i + 1));
+      const name = `Зона ${i + 1}`;
       const color = PALETTE[i % PALETTE.length];
       const geojson = cellToGeoJSON(cell);
+      const groupId = crypto.randomUUID();
 
-      const { data, error } = await supabase
-        .from('zones')
-        .insert({ seller_id: sellerId, name, coordinates: geojson, color })
-        .select('id')
-        .single();
+      const rows = await buildInsertRows(groupId, name, geojson, color);
+      if (!rows) {
+        hadError = true;
+        continue;
+      }
 
-      if (error || !data) {
+      const { error } = await supabase.from('zones').insert(rows);
+
+      if (error) {
         console.error('Ошибка сохранения зоны сетки:', error);
         hadError = true;
         continue;
@@ -560,15 +567,15 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
       const layer = L.polygon(cell, { color, weight: 2, fillOpacity: 0.35 });
       drawnItems.addLayer(layer);
-      zoneLayersRef.current.set(data.id, layer);
-      attachZoneInteractions(layer, data.id, name);
+      zoneLayersRef.current.set(groupId, layer);
+      attachZoneInteractions(layer, groupId, name);
     }
 
     setZonesCount(() => cells.length);
     if (hadError) {
-      setToast({ message: t('saveErrorGeneric'), type: 'error' });
+      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
     } else {
-      setToast({ message: t('zonesCreatedMsg'), type: 'success' });
+      setToast({ message: 'Зоны успешно созданы', type: 'success' });
     }
   }
 
@@ -579,7 +586,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       {initError && (
         <div className="absolute top-3 left-3 right-3 z-[2000] bg-red-50 border border-red-300
           text-red-700 rounded-lg shadow-lg px-4 py-3 text-sm">
-          <b>{t('initToolErrorPrefix')}</b> {initError}
+          <b>Не удалось загрузить инструмент рисования зон:</b> {initError}
         </div>
       )}
 
@@ -589,7 +596,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
           className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] bg-blue-600 text-white
             px-4 py-2 rounded-lg shadow-lg font-semibold hover:bg-blue-700"
         >
-          {t('finishShapeBtn')}
+          ✓ Завершить фигуру
         </button>
       )}
 
@@ -598,11 +605,11 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         className="absolute bottom-4 right-4 z-[1000] bg-white px-4 py-2 rounded-xl shadow-lg
           font-bold hover:bg-gray-50"
       >
-        {t('autoLayoutBtn')}
+        🎯 Авторазметка зон
       </button>
 
       <div className="absolute bottom-4 left-3 z-[1000] bg-white rounded-xl shadow-lg px-3 py-2 text-xs text-gray-500">
-        {t('zonesSavedCountLabel').replace('{count}', String(zonesCount))}
+        Зон сохранено: {zonesCount}
       </div>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}

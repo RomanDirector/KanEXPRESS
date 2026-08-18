@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, FileText, BarChart2, Archive, Users, Map, Navigation, MapPinned, TrendingDown, Ban, User, Box, ScanLine, Menu, RotateCcw } from 'lucide-react'
+import { LayoutDashboard, Map, TrendingDown, User, Menu, RotateCcw } from 'lucide-react'
 import { LangProvider, useLang } from '@/lib/i18n'
 import { supabase, signOutAndRedirect } from '@/lib/supabase'
 import { SellerContext, useSeller, type SellerProfile } from '@/lib/seller-context'
@@ -35,18 +35,9 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const seller = useSeller()
 
   const navItems = [
-    { href: '/dashboard',       label: t('dashboard'),     icon: LayoutDashboard },
-    { href: '/invoices',        label: t('invoices'),      icon: FileText },
+    { href: '/dashboard',       label: t('ordersNav'),     icon: LayoutDashboard },
     { href: '/orders-map',      label: t('map'),           icon: Map },
-    { href: '/delivery-zones',  label: t('deliveryZones'), icon: MapPinned },
-    { href: '/boxes',           label: t('boxesNav'),      icon: Box },
-    { href: '/scan',            label: t('scanNav'),       icon: ScanLine },
-    { href: '/tracking',        label: t('tracking'),      icon: Navigation },
     { href: '/demping',         label: t('demping'),       icon: TrendingDown },
-    { href: '/stats',           label: t('stats'),         icon: BarChart2 },
-    { href: '/staff',           label: t('staff'),         icon: Users },
-    { href: '/archive',         label: t('archive'),       icon: Archive },
-    { href: '/cancelled',       label: t('cancelled'),     icon: Ban },
     { href: '/returns',         label: t('returns'),       icon: RotateCcw },
     { href: '/profile',         label: t('profileNav'),   icon: User },
   ]
@@ -122,16 +113,20 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
 
       {/* Низ sidebar */}
       <div className="px-2">
-        {seller.company_logo_url && (
-          <div className="flex items-center gap-2 px-1 mb-2">
+        <div className="flex items-center gap-2 px-1 mb-2">
+          {seller.company_logo_url ? (
             <img
               src={seller.company_logo_url}
               alt=""
               className="w-8 h-8 rounded-full object-contain border border-gray-200 bg-white flex-shrink-0"
             />
-            <span className="text-xs font-semibold text-gray-700 truncate">{seller.organization_name}</span>
-          </div>
-        )}
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center text-sm font-black flex-shrink-0">
+              {seller.organization_name?.trim()?.[0]?.toUpperCase() || '?'}
+            </div>
+          )}
+          <span className="text-xs font-semibold text-gray-700 truncate">{seller.organization_name}</span>
+        </div>
         <div className="bg-red-50 rounded-xl p-3 border border-red-100">
           <p className="text-xs font-bold text-red-600">KanExpress</p>
           <p className="text-xs text-gray-400 mt-0.5">{t('sidebarTagline')}</p>
