@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { LayoutDashboard, Map, TrendingDown, User, Menu, RotateCcw } from 'lucide-react'
@@ -9,14 +9,59 @@ import { supabase, signOutAndRedirect } from '@/lib/supabase'
 import { SellerContext, useSeller, type SellerProfile } from '@/lib/seller-context'
 import { Spinner } from '@/components/ui/spinner'
 
+// Одноразовое уведомление администратора о новой заявке продавца (пункт 5 ТЗ).
+// Fail-soft: любые ошибки только логируются и не мешают входу. Флаг в localStorage
+// по id пользователя гарантирует одну отправку, а не письмо на каждый рендер.
+async function notifyAdminOnce(profile: SellerProfile) {
+  if (profile.access_status !== 'pending') return
+  const key = `kanexpress_reg_notified_${profile.id}`
+  try {
+    if (localStorage.getItem(key)) return
+  } catch {
+    // localStorage недоступен (приватный режим и т.п.) — просто выходим.
+    return
+  }
+  try {
+    const res = await fetch('/api/notify/registration', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        role: 'seller',
+        name: profile.full_name,
+        phone: profile.phone,
+        organization: profile.organization_name,
+      }),
+    })
+    // Ставим флаг, только если запрос дошёл до сервера (200), чтобы при сетевом
+    // сбое попытка повторилась при следующем входе.
+    if (res.ok) {
+      try {
+        localStorage.setItem(key, '1')
+      } catch {
+        /* игнорируем — не критично */
+      }
+    }
+  } catch (err) {
+    console.error('[notify] не удалось отправить уведомление о регистрации', err)
+  }
+}
+
 // Гейт доступа: продавец с access_status 'pending'/'banned' видит только это,
 // без сайдбара и без доступа к данным других разделов панели.
-function AccessRestrictedScreen() {
+// pending — заявка отправлена, ждём одобрения; banned — доступ заблокирован.
+function AccessRestrictedScreen({ status }: { status: 'pending' | 'banned' }) {
+  const isPending = status === 'pending'
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-sm w-full text-center">
-        <h1 className="text-lg font-black text-gray-900 mb-2">Доступ ограничен</h1>
-        <p className="text-sm text-gray-500 mb-6">Обратитесь к администратору KanExpress</p>
+        <h1 className="text-lg font-black text-gray-900 mb-2">
+          {isPending ? 'Заявка на рассмотрении' : 'Доступ заблокирован'}
+        </h1>
+        <p className="text-sm text-gray-500 mb-6">
+          {isPending
+            ? 'Ваша заявка отправлена администратору. Ожидайте подтверждения — доступ к панели откроется после одобрения.'
+            : 'Доступ к панели заблокирован. Свяжитесь с администратором KanExpress.'}
+        </p>
         <button
           onClick={() => signOutAndRedirect()}
           className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 text-sm font-semibold hover:bg-gray-50 transition-all"
@@ -143,6 +188,10 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const [seller, setSeller] = useState<SellerProfile | null>(null)
   const [checking, setChecking] = useState(true)
 
+  // id профиля, загруженного в состояние — чтобы в обработчике смены сессии
+  // отличить «тот же пользователь» от «вошёл другой аккаунт в этой же вкладке».
+  const loadedIdRef = useRef<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
 
@@ -169,14 +218,46 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
         return
       }
 
+      loadedIdRef.current = (sellerProfile as SellerProfile).id
       setSeller(sellerProfile as SellerProfile)
       setChecking(false)
+
+      // Пункт 5 ТЗ: при первом входе продавца со статусом 'pending' один раз
+      // уведомляем администратора по почте. Флаг в localStorage по id пользователя
+      // не даёт слать письмо при каждом рендере/перезаходе.
+      notifyAdminOnce(sellerProfile as SellerProfile)
     }
 
     checkAuth()
 
+    // Вторая линия обороны против «залипания» данных прошлого продавца в
+    // React-состоянии: если сессия пропала (SIGNED_OUT) или сменилась на другой
+    // аккаунт (id пользователя изменился), сбрасываем профиль и уводим на /login,
+    // а не показываем данные предыдущего пользователя до навигации.
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (cancelled) return
+      if (event === 'SIGNED_OUT' || !session) {
+        loadedIdRef.current = null
+        setSeller(null)
+        setChecking(true)
+        router.push('/login')
+        return
+      }
+      // Вошёл другой пользователь в этой же вкладке — сбрасываем текущий профиль
+      // и перезагружаем данные под новую сессию.
+      if (loadedIdRef.current && session.user.id !== loadedIdRef.current) {
+        loadedIdRef.current = null
+        setSeller(null)
+        setChecking(true)
+        checkAuth()
+      }
+    })
+
     return () => {
       cancelled = true
+      subscription.unsubscribe()
     }
   }, [router])
 
@@ -189,7 +270,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (seller.access_status === 'banned' || seller.access_status === 'pending') {
-    return <AccessRestrictedScreen />
+    return <AccessRestrictedScreen status={seller.access_status} />
   }
 
   return <SellerContext.Provider value={seller}>{children}</SellerContext.Provider>

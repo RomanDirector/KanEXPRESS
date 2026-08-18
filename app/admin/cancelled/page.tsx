@@ -45,6 +45,7 @@ export default function AdminCancelledPage() {
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     supabase
@@ -72,7 +73,15 @@ export default function AdminCancelledPage() {
     if (courierName) query = query.eq('courier_name', courierName)
 
     const { data, error } = await query
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setLoadError(error.message)
+      setRows([])
+      setHasMore(false)
+      setLoading(false)
+      return
+    }
+    setLoadError(null)
     const result = (data || []) as unknown as CancelledRow[]
     setRows(result)
     setHasMore(result.length === PAGE_SIZE)
@@ -123,6 +132,8 @@ export default function AdminCancelledPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки отменённых заказов: {loadError}</div>
         ) : rows.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Отменённых заказов не найдено</div>
         ) : (

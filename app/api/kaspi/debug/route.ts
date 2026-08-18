@@ -32,6 +32,13 @@ async function createRouteClient() {
 // Возвращает сырой JSON без обработки, включая реальные ПДн клиента —
 // не оставлять в проде, не публиковать этот ответ никуда наружу.
 export async function GET(request: NextRequest) {
+  // В проде debug-роут выключен полностью: отдаёт 404 ДО любой работы с данными,
+  // сессией и Supabase, чтобы сырые ПДн клиентов Kaspi нельзя было получить на
+  // боевом окружении. В dev роут остаётся полностью рабочим (см. комментарий выше).
+  if (process.env.NODE_ENV === 'production') {
+    return new NextResponse('Not Found', { status: 404 })
+  }
+
   // sellerId берём только из серверной сессии — query-параметр ?sellerId= игнорируется намеренно.
   const routeClient = await createRouteClient()
   const {

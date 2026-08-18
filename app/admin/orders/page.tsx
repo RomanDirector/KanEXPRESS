@@ -111,9 +111,11 @@ export default function AdminOrdersPage() {
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   async function loadPage(pageIndex: number) {
     setLoading(true)
+    setLoadError(null)
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
     const { data, error } = await supabase
@@ -122,7 +124,14 @@ export default function AdminOrdersPage() {
       .in('status', ['pending', 'in_transit'])
       .order('created_at', { ascending: false })
       .range(from, to)
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setLoadError(error.message)
+      setOrders([])
+      setHasMore(false)
+      setLoading(false)
+      return
+    }
     const rows = (data || []) as unknown as OrderDetail[]
     setOrders(rows)
     setHasMore(rows.length === PAGE_SIZE)
@@ -217,6 +226,8 @@ export default function AdminOrdersPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки заказов: {loadError}</div>
         ) : orders.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Активных заказов нет</div>
         ) : (

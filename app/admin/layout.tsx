@@ -68,7 +68,13 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
         <nav className="flex flex-col gap-1 flex-1">
           {navItems.map((item) => {
             const Icon = item.icon
-            const isActive = pathname === item.href
+            // Вложенные роуты (/admin/couriers/[id], /admin/sellers/[id]) должны
+            // подсвечивать свой родительский пункт. '/admin' — только точное
+            // совпадение, иначе дашборд подсветился бы на всех страницах.
+            const isActive =
+              item.href === '/admin'
+                ? pathname === '/admin'
+                : pathname === item.href || pathname.startsWith(item.href + '/')
             return (
               <Link
                 key={item.href}

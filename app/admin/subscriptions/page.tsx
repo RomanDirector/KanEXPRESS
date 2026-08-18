@@ -48,15 +48,23 @@ async function upsertExpiresAt(sellerId: string, expiresAt: string) {
 export default function AdminSubscriptionsPage() {
   const [sellers, setSellers] = useState<SellerRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
+    setLoadError(null)
     const { data, error } = await supabase
       .from('sellers')
       .select('id, organization_name, seller_subscriptions(plan, expires_at, trial_ends_at)')
       .order('organization_name')
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setLoadError(error.message)
+      setSellers([])
+      setLoading(false)
+      return
+    }
     setSellers((data || []) as unknown as SellerRow[])
     setLoading(false)
   }
@@ -103,6 +111,10 @@ export default function AdminSubscriptionsPage() {
       <main className="px-4 md:px-8 py-6 max-w-6xl mx-auto">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки подписок: {loadError}</div>
+        ) : sellers.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 text-sm">Продавцов нет</div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">

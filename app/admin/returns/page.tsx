@@ -31,15 +31,23 @@ const STATUS_CLASS: Record<ReturnStatus, string> = {
 export default function AdminReturnsPage() {
   const [rows, setRows] = useState<ReturnRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
+    setLoadError(null)
     const { data, error } = await supabase
       .from('return_requests')
       .select('id, reason, status, created_at, resolved_at, orders(order_number), sellers(organization_name)')
       .order('created_at', { ascending: false })
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setLoadError(error.message)
+      setRows([])
+      setLoading(false)
+      return
+    }
     setRows((data || []) as unknown as ReturnRow[])
     setLoading(false)
   }
@@ -72,6 +80,8 @@ export default function AdminReturnsPage() {
       <main className="px-4 md:px-8 py-6 max-w-6xl mx-auto">
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки заявок: {loadError}</div>
         ) : rows.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Заявок нет</div>
         ) : (

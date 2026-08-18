@@ -20,17 +20,25 @@ interface CourierRow {
 export default function AdminCouriersPage() {
   const [couriers, setCouriers] = useState<CourierRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
       setLoading(true)
+      setLoadError(null)
       const { data, error } = await supabase
         .from('couriers')
         .select('id, full_name, phone, car_number, access_status, earned, debt, courier_zones(zones(name))')
         .order('full_name')
-      if (error) console.error(error)
+      if (error) {
+        console.error(error)
+        setLoadError(error.message)
+        setCouriers([])
+        setLoading(false)
+        return
+      }
 
       // Дедупликация по id: courier_zones — one-to-many, один курьер с
       // несколькими зонами не должен превращаться в несколько строк списка.
@@ -98,6 +106,8 @@ export default function AdminCouriersPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки курьеров: {loadError}</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Курьеры не найдены</div>
         ) : (

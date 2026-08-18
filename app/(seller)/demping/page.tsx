@@ -301,37 +301,42 @@ export default function DempingPage() {
     }
   }
 
+  // Изменение цены идёт через серверный гейт /api/demping/apply: он проверяет
+  // сессию, владение правилом и статус подписки ПЕРЕД записью в БД. Новую цену
+  // считает сам роут из состояния правила в БД — с клиента её не передаём, чтобы
+  // истёкшую подписку нельзя было обойти прямым запросом из консоли.
+  async function applyDempingPrice(
+    ruleId: string,
+    action: 'decrease' | 'competitor'
+  ): Promise<{ skipped: boolean; oldPrice: number; newPrice: number } | null> {
+    try {
+      const res = await fetch('/api/demping/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleId, action }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast({ message: json?.error || t('saveErrorGeneric'), type: 'error' });
+        return null;
+      }
+      return { skipped: Boolean(json.skipped), oldPrice: json.oldPrice, newPrice: json.newPrice };
+    } catch (err) {
+      console.error(err);
+      setToast({ message: t('saveErrorGeneric'), type: 'error' });
+      return null;
+    }
+  }
+
   async function decreaseOnce(rule: Rule) {
     if (rule.current_price <= rule.min_price || !rule.is_active) return;
-    const newPriceVal = Math.min(Math.max(rule.current_price - rule.step, rule.min_price), rule.max_price);
 
-    const { error: e1 } = await supabase
-      .from('demping_rules')
-      .update({ current_price: newPriceVal })
-      .eq('id', rule.id)
-      .eq('seller_id', sellerId ?? '');
-
-    if (e1) {
-      console.error(e1);
-      alert(t('errorPrefix') + e1.message);
-      return;
+    const result = await applyDempingPrice(rule.id, 'decrease');
+    if (!result) return;
+    if (!result.skipped) {
+      priceChangeToast(result.oldPrice, result.newPrice);
+      publishToKaspi(rule.id);
     }
-
-    priceChangeToast(rule.current_price, newPriceVal);
-
-    const { error: e2 } = await supabase.from('demping_history').insert({
-      rule_id: rule.id,
-      product_name: rule.product_name,
-      old_price: rule.current_price,
-      new_price: newPriceVal,
-      triggered_by: 'manual',
-    });
-    if (e2) {
-      console.error(e2);
-      setToast({ message: t('saveErrorGeneric'), type: 'error' });
-    }
-
-    publishToKaspi(rule.id);
     loadAll();
   }
 
@@ -342,34 +347,10 @@ export default function DempingPage() {
     if (!rule.follow_competitor || rule.competitor_price == null) return;
     if (rule.current_price < rule.competitor_price) return;
 
-    const newPriceVal = Math.min(Math.max(rule.competitor_price - rule.follow_step, rule.min_price), rule.max_price);
-    if (newPriceVal === rule.current_price) return;
+    const result = await applyDempingPrice(rule.id, 'competitor');
+    if (!result || result.skipped) return;
 
-    const { error: e1 } = await supabase
-      .from('demping_rules')
-      .update({ current_price: newPriceVal })
-      .eq('id', rule.id)
-      .eq('seller_id', sellerId ?? '');
-    if (e1) {
-      console.error(e1);
-      alert(t('errorPrefix') + e1.message);
-      return;
-    }
-
-    priceChangeToast(rule.current_price, newPriceVal);
-
-    const { error: e2 } = await supabase.from('demping_history').insert({
-      rule_id: rule.id,
-      product_name: rule.product_name,
-      old_price: rule.current_price,
-      new_price: newPriceVal,
-      triggered_by: 'competitor_follow',
-    });
-    if (e2) {
-      console.error(e2);
-      setToast({ message: t('saveErrorGeneric'), type: 'error' });
-    }
-
+    priceChangeToast(result.oldPrice, result.newPrice);
     publishToKaspi(rule.id);
   }
 

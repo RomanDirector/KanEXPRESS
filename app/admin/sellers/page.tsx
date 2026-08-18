@@ -30,16 +30,24 @@ const SUB_STATUS_CLASS: Record<'trial' | 'active' | 'expired', string> = {
 export default function AdminSellersPage() {
   const [sellers, setSellers] = useState<SellerRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   useEffect(() => {
     async function load() {
       setLoading(true)
+      setLoadError(null)
       const { data, error } = await supabase
         .from('sellers')
         .select('id, organization_name, full_name, phone, access_status, seller_subscriptions(plan, expires_at, trial_ends_at)')
         .order('organization_name')
-      if (error) console.error(error)
+      if (error) {
+        console.error(error)
+        setLoadError(error.message)
+        setSellers([])
+        setLoading(false)
+        return
+      }
       setSellers((data || []) as unknown as SellerRow[])
       setLoading(false)
     }
@@ -76,6 +84,8 @@ export default function AdminSellersPage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки продавцов: {loadError}</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Продавцы не найдены</div>
         ) : (

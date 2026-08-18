@@ -74,6 +74,7 @@ export default function AdminArchivePage() {
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [totalCount, setTotalCount] = useState(0)
   const [deliveredCount, setDeliveredCount] = useState(0)
@@ -107,7 +108,15 @@ export default function AdminArchivePage() {
       .range(fromIdx, toIdx)
     query = applyFilters(query, status, sellerId, from, to)
     const { data, error } = await query
-    if (error) console.error(error)
+    if (error) {
+      console.error(error)
+      setLoadError(error.message)
+      setRows([])
+      setHasMore(false)
+      setLoading(false)
+      return
+    }
+    setLoadError(null)
     const result = (data || []) as unknown as ArchiveRow[]
     setRows(result)
     setHasMore(result.length === PAGE_SIZE)
@@ -286,6 +295,8 @@ export default function AdminArchivePage() {
 
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">Загрузка...</div>
+        ) : loadError ? (
+          <div className="text-center py-20 text-red-500 text-sm">Ошибка загрузки архива: {loadError}</div>
         ) : rows.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-sm">Заказы не найдены</div>
         ) : (

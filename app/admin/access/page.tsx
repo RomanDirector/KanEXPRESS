@@ -111,10 +111,16 @@ export default function AdminAccessPage() {
         </div>
 
         {pending.length > 0 && (
-          <div className="mb-4">
-            <h2 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
-              Ожидают подтверждения ({pending.length})
-            </h2>
+          <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+            <span className="flex items-center justify-center min-w-7 h-7 px-2 rounded-full bg-amber-500 text-white text-sm font-black">
+              {pending.length}
+            </span>
+            <div>
+              <p className="text-sm font-bold text-amber-800">Ожидают подтверждения</p>
+              <p className="text-xs text-amber-600">
+                Новые заявки на доступ — {tab === 'sellers' ? 'магазины' : 'курьеры'}. Показаны первыми в списке ниже.
+              </p>
+            </div>
           </div>
         )}
 
