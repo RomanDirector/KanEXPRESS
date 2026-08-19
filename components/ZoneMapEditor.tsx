@@ -152,8 +152,17 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   }
 
   // Строки для bulk-insert новой/пересозданной группы — одна строка на
-  // каждого существующего продавца, все с одним zone_group_id.
-  async function buildInsertRows(groupId: string, name: string, coordinates: GeoJSON.Polygon, color: string) {
+  // каждого существующего продавца, все с одним zone_group_id. display_number
+  // обязателен здесь же — без него зона молча превращается в "—" на
+  // накладной (см. память bug_zone_number_missing.md), поэтому зона без
+  // номера в базу не попадает вовсе.
+  async function buildInsertRows(
+    groupId: string,
+    name: string,
+    coordinates: GeoJSON.Polygon,
+    color: string,
+    displayNumber: number,
+  ) {
     const { data: sellersData, error } = await supabase.from('sellers').select('id');
     if (error || !sellersData || sellersData.length === 0) return null;
     return sellersData.map((s: { id: string }) => ({
@@ -162,7 +171,28 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       coordinates,
       color,
       zone_group_id: groupId,
+      display_number: displayNumber,
     }));
+  }
+
+  // Зацикленный prompt — не отпускает, пока не введут положительное целое
+  // число, либо пока не отменят вовсе (null = отмена создания зоны целиком).
+  function promptForZoneNumber(): number | null {
+    while (true) {
+      const input = window.prompt('Номер зоны (обязательно, целое число больше 0):');
+      if (input === null) return null;
+      const trimmed = input.trim();
+      if (trimmed === '') {
+        alert('Номер зоны обязателен — без него зона не появится на накладных');
+        continue;
+      }
+      const value = Number(trimmed);
+      if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+        alert('Введите целое число больше 0');
+        continue;
+      }
+      return value;
+    }
   }
 
   useEffect(() => {
@@ -247,11 +277,14 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       if (!name || !name.trim()) return;
       const trimmed = name.trim();
 
+      const displayNumber = promptForZoneNumber();
+      if (displayNumber === null) return;
+
       const geojson = (layer.toGeoJSON() as any).geometry;
       const color = PALETTE[zonesCountRef.current % PALETTE.length];
       const groupId = crypto.randomUUID();
 
-      const rows = await buildInsertRows(groupId, trimmed, geojson, color);
+      const rows = await buildInsertRows(groupId, trimmed, geojson, color, displayNumber);
       if (!rows) {
         alert('Не удалось создать зону: в системе нет ни одного продавца');
         return;
@@ -261,7 +294,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
       if (error) {
         console.error('Ошибка сохранения зоны:', error);
-        alert('Ошибка сохранения зоны: ' + error.message);
+        alert(error.code === '23505' ? 'Этот номер уже занят другой зоной' : 'Ошибка сохранения зоны: ' + error.message);
         return;
       }
 
@@ -551,7 +584,11 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       const geojson = cellToGeoJSON(cell);
       const groupId = crypto.randomUUID();
 
-      const rows = await buildInsertRows(groupId, name, geojson, color);
+      // Сетка создаётся пачкой — просить номер на каждую из N² ячеек
+      // отдельным prompt-ом непрактично, поэтому нумеруем по порядку самой
+      // сетки (i+1 совпадает с "Зона {i+1}" в имени), но, в отличие от
+      // прежнего поведения, номер проставляется сразу, а не остаётся NULL.
+      const rows = await buildInsertRows(groupId, name, geojson, color, i + 1);
       if (!rows) {
         hadError = true;
         continue;

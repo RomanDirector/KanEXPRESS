@@ -45,10 +45,14 @@ export async function assignZonesToOrders(sellerId: string): Promise<{ assigned:
     zoneToCouriers[row.zone_id].push(name)
   }
 
+  // Раньше здесь стоял .is('courier_name', null) — из-за него заказы с уже
+  // назначенным курьером навсегда пропускали бэкфилл zone_id (см. память
+  // bug_zone_number_missing.md). Присвоение зоны не должно зависеть от того,
+  // назначен ли курьер — фильтруем только по отсутствию zone_id.
   const { data: orders, error } = await supabase
-    .from('orders').select('id, lat, lng')
+    .from('orders').select('id, lat, lng, courier_name')
     .eq('seller_id', sellerId)
-    .is('courier_name', null).in('status', ['pending', 'in_transit'])
+    .is('zone_id', null).in('status', ['pending', 'in_transit'])
     .not('lat', 'is', null).not('lng', 'is', null)
   if (error || !orders) { console.error('Ошибка загрузки заказов:', error); return { assigned: 0, unassigned: 0 } }
 
@@ -59,6 +63,19 @@ export async function assignZonesToOrders(sellerId: string): Promise<{ assigned:
   for (const order of orders) {
     const zone = pointInZone(order.lat, order.lng, zones)
     if (!zone) { unassigned++; continue }
+
+    // У заказа уже есть курьер — раньше такие заказы сюда вообще не попадали
+    // (см. комментарий у фильтра выше). Теперь попадают, но курьера через
+    // round-robin не трогаем, только доставляем zone_id.
+    if (order.courier_name) {
+      const { error: updError } = await supabase.from('orders')
+        .update({ zone_id: zone.id })
+        .eq('id', order.id)
+        .eq('seller_id', sellerId)
+      if (updError) console.error('Ошибка обновления заказа (только zone_id)', order.id, updError)
+      else assigned++
+      continue
+    }
 
     const couriers = zoneToCouriers[zone.id]
     if (couriers && couriers.length > 0) {

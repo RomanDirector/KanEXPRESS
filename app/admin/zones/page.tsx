@@ -256,8 +256,13 @@ export default function AdminZonesPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {zones.map((z) => (
-                    <tr key={z.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-4">
+                    <tr
+                      key={z.id}
+                      className={`transition-colors ${
+                        z.display_number == null ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <td className={`px-5 py-4 ${z.display_number == null ? 'border-l-4 border-red-400' : ''}`}>
                         <span className="inline-flex items-center gap-2 font-bold text-gray-900">
                           <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: z.color }} />
                           {z.name}
@@ -265,15 +270,24 @@ export default function AdminZonesPage() {
                       </td>
                       <td className="px-5 py-4 text-gray-600">{z.organization_name || '—'}</td>
                       <td className="px-5 py-4">
-                        <input
-                          type="number"
-                          min={1}
-                          value={numberDrafts[z.id] ?? (z.display_number ?? '')}
-                          onChange={(e) => setNumberDrafts((prev) => ({ ...prev, [z.id]: e.target.value }))}
-                          onBlur={() => saveDisplayNumber(z.id)}
-                          disabled={savingId === z.id}
-                          className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
-                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={numberDrafts[z.id] ?? (z.display_number ?? '')}
+                            onChange={(e) => setNumberDrafts((prev) => ({ ...prev, [z.id]: e.target.value }))}
+                            onBlur={() => saveDisplayNumber(z.id)}
+                            disabled={savingId === z.id}
+                            className={`w-20 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 ${
+                              z.display_number == null ? 'border-red-300' : 'border-gray-200'
+                            }`}
+                          />
+                          {z.display_number == null && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 whitespace-nowrap">
+                              Без номера
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-4">
                         <select
