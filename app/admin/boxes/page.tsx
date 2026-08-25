@@ -5,6 +5,7 @@ import { X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { supabase } from '@/lib/supabase'
 import { loadZones, type Zone } from '@/lib/zones'
+import { friendlyDbError } from '@/lib/db-errors'
 import { Toast } from '@/components/Toast'
 
 interface Box {
@@ -83,7 +84,7 @@ export default function AdminBoxesPage() {
     ])
     if (bErr) {
       console.error(bErr)
-      setToast({ message: 'Не удалось загрузить данные: ' + bErr.message, type: 'error' })
+      setToast({ message: friendlyDbError(bErr, 'Не удалось загрузить ящики'), type: 'error' })
     }
     setBoxes((b || []) as unknown as Box[])
     setZones(z)
@@ -100,7 +101,8 @@ export default function AdminBoxesPage() {
       label: newLabel.trim(),
     })
     if (error) {
-      setToast({ message: 'Ошибка: ' + error.message, type: 'error' })
+      console.error('Ошибка сохранения ящика:', error)
+      setToast({ message: friendlyDbError(error, 'Не удалось сохранить ящик'), type: 'error' })
       setSavingBox(false)
       return
     }
@@ -118,7 +120,8 @@ export default function AdminBoxesPage() {
     setDeletingId(box.id)
     const { error } = await supabase.from('delivery_boxes').delete().eq('id', box.id).eq('seller_id', sellerId)
     if (error) {
-      setToast({ message: 'Ошибка: ' + error.message, type: 'error' })
+      console.error('Ошибка удаления ящика:', error)
+      setToast({ message: friendlyDbError(error, 'Не удалось удалить ящик'), type: 'error' })
     } else {
       setToast({ message: 'Ящик успешно удалён', type: 'success' })
     }

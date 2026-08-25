@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Store, Users, Package, Truck, RotateCcw, UserCheck, ArrowRight, MapPin } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { friendlyDbError } from '@/lib/db-errors'
 
 interface DashboardCounts {
   sellersTotal: number
@@ -41,6 +42,77 @@ async function countRows(table: string, filters: (q: any) => any): Promise<numbe
 export default function AdminPage() {
   const [counts, setCounts] = useState<DashboardCounts | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Разовый бэкфилл названий товаров: роут обрабатывает пачку за вызов, поэтому
+  // дёргаем его повторно, пока remaining > 0. Прогресс и ошибки — здесь.
+  const [backfillRunning, setBackfillRunning] = useState(false)
+  const [backfillProgress, setBackfillProgress] = useState<string | null>(null)
+  const [backfillError, setBackfillError] = useState<string | null>(null)
+
+  async function runBackfillProductNames() {
+    setBackfillRunning(true)
+    setBackfillError(null)
+    setBackfillProgress('Запуск…')
+
+    let totalUpdated = 0
+    let prevRemaining = Infinity
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const headers = {
+        Authorization: `Bearer ${session?.access_token ?? ''}`,
+        'Content-Type': 'application/json',
+      }
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const res = await fetch('/api/admin/backfill-product-names', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ limit: 200 }),
+        })
+        const json = await res.json().catch(() => null)
+
+        if (!res.ok) {
+          setBackfillError(
+            friendlyDbError(
+              { message: json?.error },
+              json?.error ?? 'Не удалось дозаполнить названия товаров',
+            ),
+          )
+          break
+        }
+
+        totalUpdated += json.updated ?? 0
+        const remaining: number = json.remaining ?? 0
+        setBackfillProgress(`Обработано ${totalUpdated}, осталось ${remaining}`)
+
+        if (remaining === 0) {
+          setBackfillProgress(`Готово. Заполнено названий: ${totalUpdated}.`)
+          break
+        }
+
+        // Пачка не дала прогресса (Kaspi не вернул названия для оставшихся заказов
+        // или они стабильно падают) — останавливаемся, чтобы не крутиться вечно.
+        if (json.processed === 0 || remaining >= prevRemaining) {
+          setBackfillProgress(
+            `Остановлено. Заполнено ${totalUpdated}, осталось ${remaining} — для них Kaspi не вернул названия либо запросы не прошли.`,
+          )
+          break
+        }
+
+        prevRemaining = remaining
+      }
+    } catch (err) {
+      setBackfillError(
+        friendlyDbError(null, err instanceof Error ? err.message : 'Ошибка сети, попробуйте ещё раз'),
+      )
+    } finally {
+      setBackfillRunning(false)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -153,6 +225,35 @@ export default function AdminPage() {
                 </Link>
               )
             })}
+          </div>
+
+          <div className="mt-4 bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Названия товаров в заказах</h3>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Дозаполнить названия у старых заказов, которые не покрывает обычная синхронизация.
+                  Обрабатывается пачками, можно закрыть страницу и запустить позже — прогресс не потеряется.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={runBackfillProductNames}
+                disabled={backfillRunning}
+                className="shrink-0 inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {backfillRunning ? 'Заполняем…' : 'Дозаполнить названия товаров'}
+              </button>
+            </div>
+
+            {backfillProgress && !backfillError && (
+              <p className="mt-3 text-sm text-gray-600">{backfillProgress}</p>
+            )}
+            {backfillError && (
+              <p className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {backfillError}
+              </p>
+            )}
           </div>
         </div>
       </main>

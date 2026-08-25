@@ -123,7 +123,7 @@ export function mapKaspiStatus(state: string): string {
   return STATUS_MAP[state] ?? 'pending'
 }
 
-export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
+export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string, productName: string | null = null) {
   const phone = order.phoneAlias?.trim() || order.customer?.cellPhone || ''
   return {
     seller_id: sellerId,
@@ -131,6 +131,7 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
     order_number: order.code,
     client_phone: phone,
     client_address: order.deliveryAddress?.formattedAddress ?? '',
+    product_name: productName,
     price: order.totalPrice ?? 0,
     status: mapKaspiStatus(order.state),
     created_at: new Date(order.creationDate).toISOString(),
@@ -138,6 +139,80 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string) {
     lng: order.deliveryAddress?.longitude ?? null,
     is_kaspi_delivery: order.isKaspiDelivery ?? false,
   }
+}
+
+// --- Позиции заказа (название товара) ------------------------------------
+// В Kaspi Merchant API позиции заказа НЕ лежат внутри самого объекта заказа:
+// их отдают отдельным запросом GET /orders/{id}/entries, а название товара —
+// либо прямо в атрибутах позиции (offer.name), либо в связанном ресурсе
+// product по ссылке relationships.product.links.related. Поэтому качаем
+// позиции отдельно и аккуратно достаём название из обоих возможных мест.
+
+async function kaspiGetJson(token: string, url: string, timeoutMs = 8000): Promise<any> {
+  const res = await fetch(url, {
+    headers: {
+      'X-Auth-Token': token,
+      'Content-Type': 'application/vnd.api+json',
+    },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '')
+    throw new Error(`Kaspi API ответил ${res.status}: ${bodyText || url}`)
+  }
+  return res.json()
+}
+
+// Возвращает список названий товаров заказа. Пустой список — позиций нет или
+// у них нет названия (это не ошибка). Бросает, только если сам запрос упал —
+// вызывающая сторона (kaspi-sync) ловит это и не роняет синк.
+export async function fetchKaspiOrderEntries({ token, orderId }: {
+  token: string
+  orderId: string
+}): Promise<string[]> {
+  const json = await kaspiGetJson(token, `${KASPI_API_BASE}/orders/${encodeURIComponent(orderId)}/entries`)
+  const entries = Array.isArray(json?.data) ? json.data : []
+  const names: string[] = []
+
+  for (const entry of entries) {
+    const attrs = entry?.attributes ?? {}
+    // Название часто приходит прямо в позиции (offer.name) — тогда доп. запрос не нужен.
+    const inlineName =
+      (typeof attrs?.offer?.name === 'string' && attrs.offer.name) ||
+      (typeof attrs?.product?.name === 'string' && attrs.product.name) ||
+      (typeof attrs?.name === 'string' && attrs.name) ||
+      null
+    if (inlineName && inlineName.trim()) {
+      names.push(inlineName.trim())
+      continue
+    }
+
+    // Инлайн-названия нет — тянем связанный product по ссылке из позиции.
+    const productLink: string | undefined =
+      entry?.relationships?.product?.links?.related ||
+      entry?.relationships?.merchantProduct?.links?.related
+    if (!productLink) continue
+    try {
+      const productJson = await kaspiGetJson(token, productLink)
+      const pname = productJson?.data?.attributes?.name
+      if (typeof pname === 'string' && pname.trim()) names.push(pname.trim())
+    } catch (err) {
+      // Одна недокачанная позиция не должна ронять весь заказ — пропускаем её.
+      console.error(`[kaspi] заказ ${orderId}: не удалось получить товар по ссылке позиции`, err)
+    }
+  }
+
+  return names
+}
+
+// Короткая строка названия товара для накладной: одно название целиком либо
+// «первое и ещё N» — чтобы влезало в накладную при нескольких позициях.
+export function formatProductName(names: string[]): string | null {
+  const clean = names.map((n) => n.trim()).filter(Boolean)
+  if (clean.length === 0) return null
+  const first = clean[0].length > 60 ? `${clean[0].slice(0, 57)}…` : clean[0]
+  return clean.length === 1 ? first : `${first} и ещё ${clean.length - 1}`
 }
 export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
   token: string; kaspiOrderId: string; orderCode: string

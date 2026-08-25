@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
 import { assignZonesToOrders } from '@/lib/zones'
+import { friendlyDbError } from '@/lib/db-errors'
+import { Toast } from '@/components/Toast'
 import type { MapZone } from '@/components/MapGL'
 import type { OrderPoint } from '@/components/ZoneMapEditor'
 
@@ -47,6 +49,7 @@ export default function AdminZonesPage() {
   const [allOrders, setAllOrders] = useState<OrderPoint[]>([])
   const [assigning, setAssigning] = useState(false)
   const [assignResult, setAssignResult] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
 
   async function loadAll() {
     setLoading(true)
@@ -158,7 +161,7 @@ export default function AdminZonesPage() {
     if (raw === undefined) return
     const value = raw.trim() === '' ? null : Number(raw)
     if (value !== null && (!Number.isFinite(value) || value <= 0)) {
-      alert('Номер зоны должен быть положительным числом')
+      setToast({ message: 'Номер зоны должен быть положительным числом', type: 'error' })
       return
     }
     const zone = zones.find((z) => z.id === zoneId)
@@ -171,7 +174,10 @@ export default function AdminZonesPage() {
     setSavingId(null)
     if (error) {
       console.error(error)
-      alert(error.code === '23505' ? 'Этот номер уже занят другой зоной' : 'Ошибка сохранения: ' + error.message)
+      setToast({
+        message: error.code === '23505' ? 'Этот номер уже занят другой зоной' : friendlyDbError(error, 'Не удалось сохранить номер зоны'),
+        type: 'error',
+      })
       return
     }
     setZones((prev) => prev.map((z) => (z.zone_group_id === zone.zone_group_id ? { ...z, display_number: value } : z)))
@@ -188,7 +194,7 @@ export default function AdminZonesPage() {
     if (delError) {
       console.error(delError)
       setSavingId(null)
-      alert('Ошибка отвязки курьера: ' + delError.message)
+      setToast({ message: friendlyDbError(delError, 'Не удалось отвязать курьера'), type: 'error' })
       return
     }
     if (courierId) {
@@ -196,7 +202,7 @@ export default function AdminZonesPage() {
       if (insError) {
         console.error(insError)
         setSavingId(null)
-        alert('Ошибка назначения курьера: ' + insError.message)
+        setToast({ message: friendlyDbError(insError, 'Не удалось назначить курьера'), type: 'error' })
         return
       }
     }
@@ -210,7 +216,8 @@ export default function AdminZonesPage() {
     const { error } = await supabase.from('zones').delete().eq('id', zoneId)
     setSavingId(null)
     if (error) {
-      alert('Ошибка удаления: ' + error.message)
+      console.error('Ошибка удаления зоны:', error)
+      setToast({ message: friendlyDbError(error, 'Не удалось удалить зону'), type: 'error' })
       return
     }
     setZones((prev) => prev.filter((z) => z.id !== zoneId))
@@ -342,6 +349,8 @@ export default function AdminZonesPage() {
           <ZoneMapEditor orders={allOrders} />
         </div>
       </main>
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }

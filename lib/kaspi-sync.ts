@@ -1,6 +1,42 @@
 import { createAdminClient } from './supabase-admin'
-import { fetchKaspiOrders, mapKaspiOrderToRow, isValidKaspiToken } from './kaspi'
+import {
+  fetchKaspiOrders,
+  fetchKaspiOrderEntries,
+  formatProductName,
+  mapKaspiOrderToRow,
+  isValidKaspiToken,
+} from './kaspi'
 import { assignZoneIdsForSeller } from './zone-match'
+
+// Название товара тянется отдельным запросом на КАЖДЫЙ заказ (см. fetchKaspiOrderEntries),
+// поэтому качаем позиции пачками с ограничением параллелизма, чтобы не упереться
+// в таймауты/лимиты Kaspi при большом окне заказов.
+const ENTRIES_CONCURRENCY = 6
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await fn(items[index])
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+// Название товара для одного заказа. Любая ошибка запроса позиций/товара НЕ
+// роняет синк — возвращаем null и логируем (заказ сохранится без названия).
+async function resolveProductName(token: string, orderId: string): Promise<string | null> {
+  try {
+    const names = await fetchKaspiOrderEntries({ token, orderId })
+    return formatProductName(names)
+  } catch (err) {
+    console.error(`[kaspi-sync] заказ ${orderId}: не удалось получить позиции товара`, err)
+    return null
+  }
+}
 
 // Импорты относительные (не через алиас '@/lib/...'), т.к. этот модуль
 // используется и Next.js роутами, и Netlify Function — последнюю Netlify
@@ -58,12 +94,21 @@ export async function syncKaspiOrders(sellerId?: string): Promise<SellerSyncResu
     }
 
     try {
+      const token = seller.kaspi_token
       const kaspiOrders = await fetchKaspiOrders({
-        token: seller.kaspi_token,
+        token,
         shopId: seller.kaspi_shop_id ?? '',
       })
 
-      const rows = kaspiOrders.map((order) => mapKaspiOrderToRow(order, seller.id))
+      // Названия товаров качаются отдельными запросами к Kaspi (позиции заказа),
+      // параллельно с ограничением — см. resolveProductName / mapWithConcurrency.
+      const productNames = await mapWithConcurrency(
+        kaspiOrders,
+        ENTRIES_CONCURRENCY,
+        (order) => resolveProductName(token, order.id),
+      )
+
+      const rows = kaspiOrders.map((order, i) => mapKaspiOrderToRow(order, seller.id, productNames[i]))
 
       if (rows.length > 0) {
         const { error: upsertError } = await supabase
