@@ -7,6 +7,7 @@ import 'leaflet-draw/dist/leaflet.draw.css';
 import 'leaflet-draw';
 import { supabase } from '@/lib/supabase';
 import { Toast } from '@/components/Toast';
+import { friendlyDbError } from '@/lib/db-errors';
 import { buildWarehouseIcon } from '@/lib/map-icons';
 
 const ALMATY_CENTER: [number, number] = [43.238949, 76.889709];
@@ -253,7 +254,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
       const rows = await buildInsertRows(groupId, trimmed, geojson, color);
       if (!rows) {
-        alert('Не удалось создать зону: в системе нет ни одного продавца');
+        setToast({ message: 'Не удалось создать зону: в системе нет ни одного продавца', type: 'error' });
         return;
       }
 
@@ -261,7 +262,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
       if (error) {
         console.error('Ошибка сохранения зоны:', error);
-        alert('Ошибка сохранения зоны: ' + error.message);
+        setToast({ message: friendlyDbError(error, 'Не удалось сохранить зону, попробуйте снова'), type: 'error' });
         return;
       }
 
@@ -283,7 +284,10 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
           .from('zones')
           .update({ coordinates: geojson })
           .eq('zone_group_id', meta.groupId);
-        if (error) alert('Ошибка сохранения изменений: ' + error.message);
+        if (error) {
+          console.error('Ошибка сохранения изменений зоны:', error);
+          setToast({ message: friendlyDbError(error, 'Не удалось сохранить изменения зоны'), type: 'error' });
+        }
       });
     });
 
@@ -298,7 +302,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
           .delete()
           .eq('zone_group_id', meta.groupId);
         if (error) {
-          alert('Ошибка удаления: ' + error.message);
+          console.error('Ошибка удаления зоны:', error);
+          setToast({ message: friendlyDbError(error, 'Не удалось удалить зону'), type: 'error' });
           return;
         }
         layerMetaRef.current.delete(stamp);
@@ -380,7 +385,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       .update({ name: newName })
       .eq('zone_group_id', groupId);
     if (error) {
-      alert('Ошибка переименования: ' + error.message);
+      console.error('Ошибка переименования зоны:', error);
+      setToast({ message: friendlyDbError(error, 'Не удалось переименовать зону'), type: 'error' });
       return;
     }
     layerMetaRef.current.set(L.Util.stamp(layer), { groupId, name: newName });
@@ -396,7 +402,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       .delete()
       .eq('zone_group_id', groupId);
     if (error) {
-      alert('Ошибка удаления: ' + error.message);
+      console.error('Ошибка удаления зоны:', error);
+      setToast({ message: friendlyDbError(error, 'Не удалось удалить зону'), type: 'error' });
       return;
     }
 
@@ -533,7 +540,8 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         .delete()
         .not('id', 'is', null);
       if (delError) {
-        alert('Ошибка удаления старых зон: ' + delError.message);
+        console.error('Ошибка удаления старых зон:', delError);
+        setToast({ message: friendlyDbError(delError, 'Не удалось удалить старые зоны'), type: 'error' });
         return;
       }
       drawnItems.clearLayers();
@@ -544,6 +552,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     const cells = buildGridCells(n);
     let hadError = false;
+    let firstErrorMessage: string | null = null;
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
       const name = `Зона ${i + 1}`;
@@ -562,6 +571,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
       if (error) {
         console.error('Ошибка сохранения зоны сетки:', error);
         hadError = true;
+        if (!firstErrorMessage) firstErrorMessage = friendlyDbError(error, 'Не удалось сохранить зоны сетки');
         continue;
       }
 
@@ -573,7 +583,7 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
 
     setZonesCount(() => cells.length);
     if (hadError) {
-      setToast({ message: 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
+      setToast({ message: firstErrorMessage ?? 'Не удалось сохранить изменения, попробуйте снова', type: 'error' });
     } else {
       setToast({ message: 'Зоны успешно созданы', type: 'success' });
     }
