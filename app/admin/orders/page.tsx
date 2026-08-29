@@ -22,13 +22,14 @@ interface OrderDetail {
   cancelled_at: string | null
   cancel_reason: string | null
   seller_id: string
+  product_name: string | null
   sellers: { organization_name: string | null } | null
   zones: { name: string; display_number: number | null } | null
   box: { code: string; label: string } | null
 }
 
 const ORDER_DETAIL_COLUMNS =
-  'id, order_number, client_phone, client_address, status, courier_stage, courier_name, price, created_at, dropped_at, accepted_at, cancelled_at, cancel_reason, seller_id, sellers(organization_name), zones(name, display_number), box:delivery_boxes(code, label)'
+  'id, order_number, client_phone, client_address, status, courier_stage, courier_name, price, created_at, dropped_at, accepted_at, cancelled_at, cancel_reason, seller_id, product_name, sellers(organization_name), zones(name, display_number), box:delivery_boxes(code, label)'
 
 function fmt(value: string | null) {
   return value ? new Date(value).toLocaleString('ru-RU') : '—'
@@ -52,6 +53,10 @@ function OrderCard({ order }: { order: OrderDetail }) {
         <div className="flex justify-between border-b border-gray-50 py-1.5">
           <span className="text-gray-400">Курьер</span>
           <span className="font-semibold text-gray-900">{order.courier_name || '—'}</span>
+        </div>
+        <div className="flex justify-between border-b border-gray-50 py-1.5">
+          <span className="text-gray-400">Товар</span>
+          <span className="font-semibold text-gray-900 text-right">{order.product_name || '—'}</span>
         </div>
         <div className="flex justify-between border-b border-gray-50 py-1.5">
           <span className="text-gray-400">Зона</span>
@@ -237,6 +242,7 @@ export default function AdminOrdersPage() {
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
                     <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Заказ</th>
+                    <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Товар</th>
                     <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Продавец</th>
                     <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Курьер</th>
                     <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">Статус</th>
@@ -249,6 +255,7 @@ export default function AdminOrdersPage() {
                     return (
                       <tr key={o.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-4 font-mono font-bold text-gray-900">{o.order_number}</td>
+                        <td className="px-4 py-4 text-gray-600 max-w-[200px] truncate">{o.product_name || '—'}</td>
                         <td className="px-4 py-4 text-gray-600">{o.sellers?.organization_name || '—'}</td>
                         <td className="px-4 py-4 text-gray-600">{o.courier_name || '—'}</td>
                         <td className="px-4 py-4">

@@ -213,6 +213,24 @@ export default function AdminZonesPage() {
   async function deleteZone(zoneId: string) {
     if (!confirm('Удалить зону?')) return
     setSavingId(zoneId)
+
+    // Привязка курьера/ящика к зоне подчищается автоматически на уровне БД
+    // (ON DELETE CASCADE/SET NULL), но заказы — это история, и FK на
+    // orders.zone_id намеренно остаётся защитой (RESTRICT). Проверяем заранее,
+    // чтобы показать понятную причину, а не сырую ошибку 23503 после отказа.
+    const { count: ordersCount } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('zone_id', zoneId)
+    if ((ordersCount ?? 0) > 0) {
+      setSavingId(null)
+      setToast({
+        message: `Нельзя удалить: с этой зоной связано заказов — ${ordersCount}. Удаление возможно только для зон без истории заказов.`,
+        type: 'error',
+      })
+      return
+    }
+
     const { error } = await supabase.from('zones').delete().eq('id', zoneId)
     setSavingId(null)
     if (error) {

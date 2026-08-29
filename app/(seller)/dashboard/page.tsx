@@ -20,7 +20,22 @@ const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 const PAGE_SIZE = 15
 const ORDER_COLUMNS =
-  'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at'
+  'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name'
+
+// Границы дня для фильтров "Стартовая/Конечная дата" считаем в часовом поясе
+// Алматы (UTC+5, без перехода на летнее время в Казахстане), а не в UTC.
+// created_at хранится в UTC, а `new Date('2026-08-26')` парсится как UTC-полночь —
+// это на 5 часов раньше полуночи в Алматы, из-за чего конечная граница дня
+// "26 августа" на самом деле доходила до 04:59 утра 27 августа по местному
+// времени, и заказы, которые продавец видит датированными 27-м, попадали в
+// диапазон, а самые ранние заказы 25-го (до 05:00 местного) — выпадали.
+const KZ_UTC_OFFSET = '+05:00'
+function dayStartMs(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00${KZ_UTC_OFFSET}`).getTime()
+}
+function dayEndMs(dateStr: string): number {
+  return new Date(`${dateStr}T23:59:59.999${KZ_UTC_OFFSET}`).getTime()
+}
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 type Tab = 'active' | 'cancelled' | 'archive'
@@ -42,6 +57,7 @@ interface Order {
   created_at: string
   dropped_at: string | null
   accepted_at: string | null
+  product_name: string | null
 }
 
 interface ExportRow {
@@ -290,15 +306,39 @@ function ActiveOrdersTab({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [photoOrder])
 
-  async function fetchOrdersPage(currentSellerId: string, pageIndex: number, replace: boolean) {
-    const from = pageIndex * PAGE_SIZE
-    const to = from + PAGE_SIZE - 1
-    const { data, error } = await supabase
+  // Общая точка применения диапазона дат — счётчики (fetchStatCounts) и список
+  // (fetchOrdersPage) должны фильтровать created_at строго одинаково, иначе
+  // цифра "N из M" и сам список расходятся (баг: список раньше вообще не знал
+  // про даты и фильтровал их только по уже загруженной странице в памяти).
+  function applyDateRange<T extends { gte: any; lte: any }>(query: T, from: string, to: string): T {
+    let q = query
+    if (from) q = q.gte('created_at', new Date(dayStartMs(from)).toISOString())
+    if (to) q = q.lte('created_at', new Date(dayEndMs(to)).toISOString())
+    return q
+  }
+
+  async function fetchOrdersPage(
+    currentSellerId: string,
+    pageIndex: number,
+    replace: boolean,
+    from: string,
+    to: string,
+    status: OrderStatus | 'all'
+  ) {
+    const rangeFrom = pageIndex * PAGE_SIZE
+    const rangeTo = rangeFrom + PAGE_SIZE - 1
+    let query = supabase
       .from('orders')
       .select(ORDER_COLUMNS)
       .eq('seller_id', currentSellerId)
       .order('created_at', { ascending: false })
-      .range(from, to)
+    query = applyDateRange(query, from, to)
+    // Раньше статус фильтровался только клиентски, над уже загруженной страницей —
+    // если среди самых свежих PAGE_SIZE строк не было ни одной нужного статуса
+    // (а их могут быть сотни где-то дальше по пагинации), список показывал 0,
+    // хотя счётчик (fetchStatCounts, серверный) честно считал сотни совпадений.
+    if (status !== 'all') query = query.eq('status', status)
+    const { data, error } = await query.range(rangeFrom, rangeTo)
     if (error) {
       console.error(error.message)
       onToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
@@ -310,16 +350,18 @@ function ActiveOrdersTab({
     setPage(pageIndex + 1)
   }
 
-  async function fetchStatCounts(currentSellerId: string) {
+  async function fetchStatCounts(currentSellerId: string, from: string, to: string) {
     const statuses: OrderStatus[] = ['pending', 'in_transit', 'delivered']
     const results = await Promise.all(
-      statuses.map((status) =>
-        supabase
+      statuses.map((status) => {
+        let query = supabase
           .from('orders')
           .select('id', { count: 'exact', head: true })
           .eq('seller_id', currentSellerId)
           .eq('status', status)
-      )
+        query = applyDateRange(query, from, to)
+        return query
+      })
     )
     setStatCounts({
       pending: results[0].count ?? 0,
@@ -331,22 +373,40 @@ function ActiveOrdersTab({
   async function refreshOrders() {
     if (!sellerId) return
     setLoading(true)
-    await Promise.all([fetchOrdersPage(sellerId, 0, true), fetchStatCounts(sellerId)])
+    await Promise.all([
+      fetchOrdersPage(sellerId, 0, true, dateFrom, dateTo, filterStatus),
+      fetchStatCounts(sellerId, dateFrom, dateTo),
+    ])
     setLoading(false)
   }
 
   async function loadMoreOrders() {
     if (!sellerId || loadingMore || !hasMore) return
     setLoadingMore(true)
-    await fetchOrdersPage(sellerId, page, false)
+    await fetchOrdersPage(sellerId, page, false, dateFrom, dateTo, filterStatus)
     setLoadingMore(false)
   }
+
+  const filtersRef = useRef({ dateFrom: '', dateTo: '', filterStatus: 'all' as OrderStatus | 'all' })
+  useEffect(() => {
+    filtersRef.current = { dateFrom, dateTo, filterStatus }
+  }, [dateFrom, dateTo, filterStatus])
 
   useEffect(() => {
     if (!sellerId) return
     let cancelled = false
     setLoading(true)
-    Promise.all([fetchOrdersPage(sellerId, 0, true), fetchStatCounts(sellerId)]).then(() => {
+    Promise.all([
+      fetchOrdersPage(
+        sellerId,
+        0,
+        true,
+        filtersRef.current.dateFrom,
+        filtersRef.current.dateTo,
+        filtersRef.current.filterStatus
+      ),
+      fetchStatCounts(sellerId, filtersRef.current.dateFrom, filtersRef.current.dateTo),
+    ]).then(() => {
       if (!cancelled) setLoading(false)
     })
     const channel = supabase
@@ -355,8 +415,15 @@ function ActiveOrdersTab({
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders', filter: `seller_id=eq.${sellerId}` },
         () => {
-          fetchOrdersPage(sellerId, 0, true)
-          fetchStatCounts(sellerId)
+          fetchOrdersPage(
+            sellerId,
+            0,
+            true,
+            filtersRef.current.dateFrom,
+            filtersRef.current.dateTo,
+            filtersRef.current.filterStatus
+          )
+          fetchStatCounts(sellerId, filtersRef.current.dateFrom, filtersRef.current.dateTo)
         }
       )
       .subscribe()
@@ -368,11 +435,25 @@ function ActiveOrdersTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId])
 
+  // Смена дат ИЛИ статуса-карточки должна одинаково перезапускать И счётчики,
+  // И список — иначе они расходятся: список раньше не перезапрашивался, а
+  // просто фильтровал клиентски то, что уже было в памяти (первую страницу
+  // общей, не отфильтрованной по статусу пагинации).
+  useEffect(() => {
+    if (!sellerId) return
+    setLoading(true)
+    Promise.all([
+      fetchOrdersPage(sellerId, 0, true, dateFrom, dateTo, filterStatus),
+      fetchStatCounts(sellerId, dateFrom, dateTo),
+    ]).then(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerId, dateFrom, dateTo, filterStatus])
+
   const filtered = orders.filter((o) => {
     const matchStatus = filterStatus === 'all' || o.status === filterStatus
     const createdTime = new Date(o.created_at).getTime()
-    const matchDateFrom = !dateFrom || createdTime >= new Date(dateFrom).getTime()
-    const matchDateTo = !dateTo || createdTime <= new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1
+    const matchDateFrom = !dateFrom || createdTime >= dayStartMs(dateFrom)
+    const matchDateTo = !dateTo || createdTime <= dayEndMs(dateTo)
     const matchSearch =
       o.order_number.toLowerCase().includes(search.toLowerCase()) ||
       o.client_phone.includes(search) ||
@@ -836,6 +917,7 @@ function ActiveOrdersTab({
                   />
                 </th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('orderNum')}</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('productHeader')}</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('phone')}</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('address')}</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-400 uppercase tracking-wider">{t('price')}</th>
@@ -864,6 +946,7 @@ function ActiveOrdersTab({
                       />
                     </td>
                     <td className="px-4 py-4 font-mono font-bold text-gray-900">{order.order_number}</td>
+                    <td className="px-4 py-4 text-gray-600 max-w-[200px] truncate">{order.product_name || '—'}</td>
                     <td className="px-4 py-4 text-gray-600">{order.client_phone}</td>
                     <td className="px-4 py-4 text-gray-500 max-w-[160px] truncate">{order.client_address}</td>
                     <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString(locale)} ₸</td>
@@ -1106,9 +1189,8 @@ function CancelledOrdersTab({
 
   const filtered = orders.filter((o) => {
     const cancelledTime = o.cancelled_at ? new Date(o.cancelled_at).getTime() : null
-    const matchDateFrom = !dateFrom || (cancelledTime != null && cancelledTime >= new Date(dateFrom).getTime())
-    const matchDateTo =
-      !dateTo || (cancelledTime != null && cancelledTime <= new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1)
+    const matchDateFrom = !dateFrom || (cancelledTime != null && cancelledTime >= dayStartMs(dateFrom))
+    const matchDateTo = !dateTo || (cancelledTime != null && cancelledTime <= dayEndMs(dateTo))
     const matchSearch =
       o.order_number.toLowerCase().includes(search.toLowerCase()) ||
       o.client_address.toLowerCase().includes(search.toLowerCase())
@@ -1308,11 +1390,11 @@ function ArchiveTab({
     }
 
     if (dateFrom) {
-      const from = new Date(dateFrom).getTime()
+      const from = dayStartMs(dateFrom)
       list = list.filter((o) => new Date(o.created_at).getTime() >= from)
     }
     if (dateTo) {
-      const to = new Date(dateTo).getTime() + 24 * 3600 * 1000 - 1
+      const to = dayEndMs(dateTo)
       list = list.filter((o) => new Date(o.created_at).getTime() <= to)
     }
 

@@ -35,6 +35,7 @@ interface OrderRow {
   lng: number
   courier_name: string | null
   seller_id: string
+  product_name: string | null
   sellers: { organization_name: string | null } | null
 }
 
@@ -77,7 +78,7 @@ export default function AdminMapPage() {
 
       let rowsQuery = supabase
         .from('orders')
-        .select('id, order_number, client_address, client_phone, status, price, lat, lng, courier_name, seller_id, sellers(organization_name)')
+        .select('id, order_number, client_address, client_phone, status, price, lat, lng, courier_name, seller_id, product_name, sellers(organization_name)')
         .not('lat', 'is', null)
         .not('lng', 'is', null)
         .order('created_at', { ascending: false })
@@ -101,6 +102,7 @@ export default function AdminMapPage() {
           price: o.price,
           seller_name: o.sellers?.organization_name || '—',
           courier_name: o.courier_name,
+          product_name: o.product_name,
         }))
       )
       setTotalCount(count ?? rows.length)

@@ -41,6 +41,10 @@ export default function AdminBoxesPage() {
   const [savingBox, setSavingBox] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editZoneId, setEditZoneId] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const [qrBox, setQrBox] = useState<Box | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
@@ -111,6 +115,36 @@ export default function AdminBoxesPage() {
     setShowAddForm(false)
     setSavingBox(false)
     setToast({ message: 'Ящик успешно добавлен', type: 'success' })
+    loadAll()
+  }
+
+  function startEdit(box: Box) {
+    setEditingId(box.id)
+    setEditZoneId(box.zone_id || '')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditZoneId('')
+  }
+
+  async function saveEdit(box: Box) {
+    if (!editZoneId || savingEdit) return
+    setSavingEdit(true)
+    const { error } = await supabase
+      .from('delivery_boxes')
+      .update({ zone_id: editZoneId })
+      .eq('id', box.id)
+      .eq('seller_id', sellerId)
+    setSavingEdit(false)
+    if (error) {
+      console.error('Ошибка обновления зоны ящика:', error)
+      setToast({ message: friendlyDbError(error, 'Не удалось обновить зону ящика'), type: 'error' })
+      return
+    }
+    setToast({ message: 'Зона ящика обновлена', type: 'success' })
+    setEditingId(null)
+    setEditZoneId('')
     loadAll()
   }
 
@@ -258,21 +292,65 @@ export default function AdminBoxesPage() {
                       <tr key={b.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-4 font-mono font-bold text-gray-900">{b.code}</td>
                         <td className="px-5 py-4 font-semibold text-gray-700">{b.label}</td>
-                        <td className="px-5 py-4 text-gray-600">{b.zones?.name || '—'}</td>
+                        <td className="px-5 py-4 text-gray-600">
+                          {editingId === b.id ? (
+                            <select
+                              value={editZoneId}
+                              onChange={(e) => setEditZoneId(e.target.value)}
+                              className="border border-gray-200 rounded-lg px-2 py-1 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-400"
+                            >
+                              <option value="">Выберите зону</option>
+                              {zones.map((z) => (
+                                <option key={z.id} value={z.id}>
+                                  {z.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            b.zones?.name || '—'
+                          )}
+                        </td>
                         <td className="px-5 py-4 flex gap-2">
-                          <button
-                            onClick={() => openQr(b)}
-                            className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-all"
-                          >
-                            Показать QR
-                          </button>
-                          <button
-                            onClick={() => deleteBox(b)}
-                            disabled={deletingId === b.id}
-                            className="px-3 py-1 rounded-lg border border-gray-200 text-xs text-red-600 disabled:opacity-50"
-                          >
-                            {deletingId === b.id ? 'Удаляю…' : 'Удалить'}
-                          </button>
+                          {editingId === b.id ? (
+                            <>
+                              <button
+                                onClick={() => saveEdit(b)}
+                                disabled={savingEdit || !editZoneId}
+                                className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold disabled:opacity-50 transition-all"
+                              >
+                                {savingEdit ? 'Сохраняю…' : 'Сохранить'}
+                              </button>
+                              <button
+                                onClick={cancelEdit}
+                                disabled={savingEdit}
+                                className="px-3 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 disabled:opacity-50"
+                              >
+                                Отмена
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => startEdit(b)}
+                                className="px-3 py-1 rounded-lg border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition-all"
+                              >
+                                Изменить зону
+                              </button>
+                              <button
+                                onClick={() => openQr(b)}
+                                className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold transition-all"
+                              >
+                                Показать QR
+                              </button>
+                              <button
+                                onClick={() => deleteBox(b)}
+                                disabled={deletingId === b.id}
+                                className="px-3 py-1 rounded-lg border border-gray-200 text-xs text-red-600 disabled:opacity-50"
+                              >
+                                {deletingId === b.id ? 'Удаляю…' : 'Удалить'}
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     ))}

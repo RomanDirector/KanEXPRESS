@@ -19,6 +19,7 @@ export interface MapPoint {
   // в попапе). Обычные страницы продавца/курьера их не передают.
   seller_name?: string
   courier_name?: string | null
+  product_name?: string | null
 }
 
 export interface MapZone {
@@ -221,6 +222,7 @@ export function MapGL({
                   {stopNumber != null && <p className="font-bold">Остановка {stopNumber}</p>}
                   <p className="font-mono font-bold">{point.order_number}</p>
                   {point.seller_name && <p className="font-semibold">{point.seller_name}</p>}
+                  {point.product_name !== undefined && <p>Товар: {point.product_name || '—'}</p>}
                   <p>{point.client_address}</p>
                   <p>{point.client_phone}</p>
                   <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>

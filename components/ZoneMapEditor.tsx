@@ -430,6 +430,27 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
   async function deleteZone(groupId: string) {
     if (!window.confirm('Удалить эту зону?')) return;
 
+    // Заказы — это история, orders.zone_id намеренно защищён FK (RESTRICT),
+    // курьеры/ящики отвязываются от зоны автоматически (см. миграцию
+    // 2026-08-zones-delete-fk-behavior.sql). Проверяем заранее по ВСЕМ строкам
+    // группы (по одной на продавца), чтобы показать понятную причину вместо
+    // сырой ошибки 23503.
+    const { data: groupZoneRows } = await supabase.from('zones').select('id').eq('zone_group_id', groupId);
+    const groupZoneIds = (groupZoneRows || []).map((z) => z.id);
+    if (groupZoneIds.length > 0) {
+      const { count: ordersCount } = await supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .in('zone_id', groupZoneIds);
+      if ((ordersCount ?? 0) > 0) {
+        setToast({
+          message: `Нельзя удалить: с этой зоной связано заказов — ${ordersCount}. Удаление возможно только для зон без истории заказов.`,
+          type: 'error',
+        });
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from('zones')
       .delete()
