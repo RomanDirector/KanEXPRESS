@@ -50,6 +50,7 @@ export interface OrderPoint {
   lat: number;
   lng: number;
   status: string;
+  product_name?: string | null;
 }
 
 // Те же цвета статусов, что и на "Карте" (components/MapGL.tsx DEFAULT_STATUS_COLORS / orders-map).
@@ -388,8 +389,9 @@ export default function ZoneMapEditor({ orders = [] }: { orders?: OrderPoint[] }
         fillColor: color,
         fillOpacity: 1,
       });
+      const productLine = order.product_name ? `<br/>Товар: ${escapeHtml(order.product_name)}` : '';
       marker.bindPopup(
-        `<div style="min-width:160px"><b>${escapeHtml(order.order_number)}</b><br/>${escapeHtml(order.client_address)}</div>`
+        `<div style="min-width:160px"><b>${escapeHtml(order.order_number)}</b>${productLine}<br/>${escapeHtml(order.client_address)}</div>`
       );
       orderLayerRef.current!.addLayer(marker);
     });

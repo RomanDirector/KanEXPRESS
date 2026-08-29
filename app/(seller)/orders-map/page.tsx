@@ -42,6 +42,7 @@ interface Order {
   lat: number | null
   lng: number | null
   created_at: string
+  product_name: string | null
 }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
@@ -148,7 +149,7 @@ export default function MapPage() {
       }
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at')
+        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at, product_name')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
       if (error) {
@@ -203,6 +204,7 @@ export default function MapPage() {
       client_phone: o.client_phone,
       status: getDisplayStage(o),
       price: o.price,
+      product_name: o.product_name,
     }))
 
   const handlePointClick = (point: any) => {
@@ -438,6 +440,10 @@ export default function MapPage() {
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">{t('orderNum')}</span>
                   <span className="font-mono font-bold text-gray-900">{selectedOrder.order_number}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">{t('productHeader')}</span>
+                  <span className="text-sm font-medium text-gray-900 text-right max-w-[200px]">{selectedOrder.product_name || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">{t('phone')}</span>

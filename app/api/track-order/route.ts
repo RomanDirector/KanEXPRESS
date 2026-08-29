@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient()
   const { data: order, error } = await supabase
     .from('orders')
-    .select('order_number, status, courier_stage, client_address, created_at, courier_name')
+    .select('order_number, status, courier_stage, client_address, created_at, courier_name, product_name')
     .eq('order_number', orderNumber)
     .maybeSingle()
 
@@ -57,5 +57,6 @@ export async function GET(request: NextRequest) {
     client_address: order.client_address,
     created_at: order.created_at,
     queue_position: queuePosition,
+    product_name: order.product_name,
   })
 }

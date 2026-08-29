@@ -27,6 +27,7 @@ interface Order {
   created_at: string
   lat: number | null
   lng: number | null
+  product_name: string | null
 }
 
 const STAGES: DisplayStage[] = ['not_started', 'dropped', 'departed', 'arrived', 'delivered', 'returned']
@@ -243,6 +244,7 @@ export default function CourierMapPage() {
     client_phone: o.client_phone,
     status: getDisplayStage(o),
     price: o.courier_fee,
+    product_name: o.product_name,
   }))
 
   return (

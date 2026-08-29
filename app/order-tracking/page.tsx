@@ -24,6 +24,7 @@ interface TrackResult {
   client_address?: string
   created_at?: string
   queue_position?: number
+  product_name?: string | null
 }
 
 const STAGE_ICON: Record<DisplayStage, typeof Package> = {
@@ -168,7 +169,13 @@ function OrderTrackingContent() {
                 {STAGE_LABEL_LOCAL[stage]}
               </div>
             </div>
-            <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+            {result.product_name && (
+              <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+                <Package size={15} className="flex-shrink-0 text-gray-400" />
+                <span>{result.product_name}</span>
+              </div>
+            )}
+            <div className="mt-3 flex items-center gap-2 text-sm text-gray-600">
               <MapPin size={15} className="flex-shrink-0 text-gray-400" />
               <span>{result.client_address}</span>
             </div>

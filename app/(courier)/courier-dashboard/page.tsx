@@ -45,6 +45,7 @@ interface Order {
   seller_id: string | null
   status: string
   created_at: string
+  product_name: string | null
 }
 
 const STAGE_ICON: Record<DisplayStage, typeof Package> = {
@@ -360,6 +361,12 @@ export default function CourierDashboardPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="font-mono font-bold text-lg">{order.order_number}</p>
+            {order.product_name && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Package className="h-3.5 w-3.5" />
+                {order.product_name}
+              </div>
+            )}
             <div className="mt-1.5 flex items-center gap-1.5 text-sm text-muted-foreground">
               <Phone className="h-3.5 w-3.5" />
               {order.client_phone}

@@ -111,7 +111,7 @@ export default function AdminZonesPage() {
     ;(async () => {
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, client_address, lat, lng, status')
+        .select('id, order_number, client_address, lat, lng, status, product_name')
       if (error) {
         console.error(error.message)
         return
@@ -126,6 +126,7 @@ export default function AdminZonesPage() {
           lat: o.lat,
           lng: o.lng,
           status: o.status,
+          product_name: o.product_name,
         }))
       setAllOrders(points)
     })()

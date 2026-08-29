@@ -691,6 +691,7 @@ function ActiveOrdersTab({
       client_phone: o.client_phone,
       status: o.status,
       price: o.price,
+      product_name: o.product_name,
     }))
 
   async function uploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
