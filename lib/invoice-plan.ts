@@ -10,6 +10,7 @@ export interface InvoiceOrder {
   client_address: string
   created_at: string
   product_name: string | null
+  product_quantity: number | null
   zone_id: string | null
   zones: { name: string; display_number: number | null } | null
 }
@@ -39,6 +40,20 @@ const BLACK: RGB = [0, 0, 0]
 export function zoneLabel(order: InvoiceOrder): string {
   const zoneNumber = order.zone_id ? order.zones?.display_number ?? null : null
   return zoneNumber != null ? String(zoneNumber) : '—'
+}
+
+// orders.product_name больше не обрезается при сохранении (см. lib/kaspi.ts) —
+// полное название нужно для разворачивания в UI. На бумаге место физически
+// ограничено, поэтому обрезка под накладную/этикетку — забота этого модуля,
+// а не БД. Количество (product_quantity) дописывается ПОСЛЕ обрезки, чтобы
+// «× N» не потерялось у длинных названий.
+function productLabel(order: InvoiceOrder, maxNameLen: number): string | null {
+  if (!order.product_name) return null
+  const name =
+    order.product_name.length > maxNameLen
+      ? `${order.product_name.slice(0, maxNameLen - 1)}…`
+      : order.product_name
+  return order.product_quantity && order.product_quantity > 1 ? `${name} × ${order.product_quantity}` : name
 }
 
 // Накладная A4 (210×297 мм). Компоновка идёт сверху вниз без пустой середины:
@@ -76,8 +91,9 @@ export function buildInvoicePlan(order: InvoiceOrder, seller: InvoiceSeller | nu
 
   // Товар (если задан) и дата — сразу под таблицей
   let y = tableTop + tableH + 12
-  if (order.product_name) {
-    plan.push({ kind: 'text', role: 'product', text: `Товар: ${order.product_name}`, x: 20, y, fontSize: 11, color: BLACK })
+  const invoiceProductLabel = productLabel(order, 60)
+  if (invoiceProductLabel) {
+    plan.push({ kind: 'text', role: 'product', text: `Товар: ${invoiceProductLabel}`, x: 20, y, fontSize: 11, color: BLACK })
     y += 10
   }
   plan.push({ kind: 'text', role: 'date', text: `Дата: ${new Date(order.created_at).toLocaleDateString('ru-RU')}`, x: 20, y, fontSize: 11, color: BLACK })
@@ -111,8 +127,9 @@ export function buildLabelPlan(order: InvoiceOrder): Primitive[] {
 
   plan.push({ kind: 'text', role: 'address', text: order.client_address, x: 3, y: 23, fontSize: 7, color: BLACK, wrap: 60 })
 
-  if (order.product_name) {
-    plan.push({ kind: 'text', role: 'product', text: `Товар: ${order.product_name}`, x: 3, y: 34, fontSize: 7, color: BLACK })
+  const labelProductLabel = productLabel(order, 40)
+  if (labelProductLabel) {
+    plan.push({ kind: 'text', role: 'product', text: `Товар: ${labelProductLabel}`, x: 3, y: 34, fontSize: 7, color: BLACK })
   }
 
   // Название зоны мелко НАД огромной цифрой

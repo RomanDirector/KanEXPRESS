@@ -3,6 +3,7 @@ import {
   fetchKaspiOrders,
   fetchKaspiOrderEntries,
   formatProductName,
+  sumProductQuantity,
   mapKaspiOrderToRow,
   isValidKaspiToken,
 } from './kaspi'
@@ -26,15 +27,19 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   return results
 }
 
-// Название товара для одного заказа. Любая ошибка запроса позиций/товара НЕ
-// роняет синк — возвращаем null и логируем (заказ сохранится без названия).
-async function resolveProductName(token: string, orderId: string): Promise<string | null> {
+// Название товара и суммарное количество для одного заказа. Любая ошибка
+// запроса позиций/товара НЕ роняет синк — возвращаем null и логируем (заказ
+// сохранится без названия/количества).
+async function resolveProductInfo(
+  token: string,
+  orderId: string
+): Promise<{ name: string | null; quantity: number | null }> {
   try {
-    const names = await fetchKaspiOrderEntries({ token, orderId })
-    return formatProductName(names)
+    const entries = await fetchKaspiOrderEntries({ token, orderId })
+    return { name: formatProductName(entries), quantity: sumProductQuantity(entries) }
   } catch (err) {
     console.error(`[kaspi-sync] заказ ${orderId}: не удалось получить позиции товара`, err)
-    return null
+    return { name: null, quantity: null }
   }
 }
 
@@ -100,28 +105,36 @@ export async function syncKaspiOrders(sellerId?: string): Promise<SellerSyncResu
         shopId: seller.kaspi_shop_id ?? '',
       })
 
-      // Названия товаров качаются отдельными запросами к Kaspi (позиции заказа),
-      // параллельно с ограничением — см. resolveProductName / mapWithConcurrency.
-      const productNames = await mapWithConcurrency(
+      // Названия товаров и количество качаются отдельными запросами к Kaspi
+      // (позиции заказа), параллельно с ограничением — см. resolveProductInfo / mapWithConcurrency.
+      const productInfos = await mapWithConcurrency(
         kaspiOrders,
         ENTRIES_CONCURRENCY,
-        (order) => resolveProductName(token, order.id),
+        (order) => resolveProductInfo(token, order.id),
       )
 
-      const rows = kaspiOrders.map((order, i) => mapKaspiOrderToRow(order, seller.id, productNames[i]))
+      const rows = kaspiOrders.map((order, i) =>
+        mapKaspiOrderToRow(order, seller.id, productInfos[i].name, productInfos[i].quantity)
+      )
 
       if (rows.length > 0) {
-        const { error: upsertError } = await supabase
+        const { data: upsertedRows, error: upsertError } = await supabase
           .from('orders')
           .upsert(rows, { onConflict: 'seller_id,order_number' })
+          .select('id')
 
         if (upsertError) throw new Error(upsertError.message)
 
-        // Автоприсвоение zone_id только что синканным заказам (без курьера,
-        // это делает отдельно ручной бэкфилл в lib/zones.ts). Ошибка здесь
-        // не должна ронять синк заказов — только логируется.
+        // Автоприсвоение zone_id — только заказам ИЗ ЭТОГО синка (orderIds),
+        // а не всему историческому backlog без zone_id у продавца: раньше
+        // assignZoneIdsForSeller пересканировала весь backlog на каждый
+        // клик "Обновить заказы из Kaspi" — на продавце с ~1700 неразобранными
+        // заказами это добавляло ~59с к каждому синку. Бэкфилл старого
+        // backlog — отдельная ручная операция (lib/zones.ts), не часть синка.
+        // Ошибка здесь не должна ронять синк заказов — только логируется.
         try {
-          await assignZoneIdsForSeller(supabase, seller.id)
+          const orderIds = (upsertedRows ?? []).map((r) => r.id)
+          await assignZoneIdsForSeller(supabase, seller.id, { orderIds })
         } catch (zoneErr) {
           console.error(`[kaspi-sync] продавец ${seller.id}: ошибка авто-присвоения зон`, zoneErr)
         }

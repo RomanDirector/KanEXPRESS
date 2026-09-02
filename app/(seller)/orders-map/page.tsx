@@ -9,6 +9,7 @@ import { useLang } from '@/lib/i18n'
 import { Toast } from '@/components/Toast'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
 import { getSellerCourierIds } from '@/lib/couriers'
+import { dayStartMs, dayEndMs, applyDateRange } from '@/lib/date-range'
 import type { MapZone } from '@/components/MapGL'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
@@ -43,6 +44,7 @@ interface Order {
   lng: number | null
   created_at: string
   product_name: string | null
+  product_quantity: number | null
 }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: React.ReactNode }> = {
@@ -81,7 +83,10 @@ export default function MapPage() {
   const [zones, setZones] = useState<MapZone[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [productExpanded, setProductExpanded] = useState(false)
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
   const [couriers, setCouriers] = useState<CourierWithOrders[]>([])
   const [couriersLoading, setCouriersLoading] = useState(true)
@@ -137,6 +142,13 @@ export default function MapPage() {
     cancelled: t('stageCancelled'),
   }
 
+  // Без диапазона дат заказы грузятся без ограничения — но PostgREST по
+  // умолчанию режет ответ на 1000 строк. У продавца с историей в тысячи
+  // заказов это окно (самые свежие 1000) может вообще не доходить до
+  // выбранного диапазона дат — тогда клиентский date-фильтр честно
+  // отфильтрует уже неполный набор и покажет 0 точек, хотя заказы за эти
+  // даты реально есть. Поэтому диапазон дат применяется НА СЕРВЕРЕ (через
+  // applyDateRange), а не только клиентским фильтром поверх кэша.
   useEffect(() => {
     const fetchOrders = async () => {
       setLoading(true)
@@ -147,11 +159,13 @@ export default function MapPage() {
         setLoading(false)
         return
       }
-      const { data, error } = await supabase
+      let query = supabase
         .from('orders')
-        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at, product_name')
+        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at, product_name, product_quantity')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
+      query = applyDateRange(query, dateFrom, dateTo)
+      const { data, error } = await query
       if (error) {
         console.error(error.message)
         setToast({ message: t('loadErrorPrefix') + error.message, type: 'error' })
@@ -159,7 +173,9 @@ export default function MapPage() {
       setLoading(false)
     }
     fetchOrders()
+  }, [dateFrom, dateTo])
 
+  useEffect(() => {
     const fetchZones = async () => {
       const {
         data: { user },
@@ -189,9 +205,20 @@ export default function MapPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedOrder])
 
-  const filteredOrders = orders.filter(o =>
-    filterStatus === 'all' ? true : o.status === filterStatus
-  )
+  // Разворот полного названия товара сбрасывается при каждом новом выбранном
+  // заказе — иначе открытая карточка «наследует» развёрнутое состояние
+  // предыдущего заказа.
+  useEffect(() => {
+    setProductExpanded(false)
+  }, [selectedOrder?.id])
+
+  const filteredOrders = orders.filter(o => {
+    const matchStatus = filterStatus === 'all' ? true : o.status === filterStatus
+    const createdTime = new Date(o.created_at).getTime()
+    const matchDateFrom = !dateFrom || createdTime >= dayStartMs(dateFrom)
+    const matchDateTo = !dateTo || createdTime <= dayEndMs(dateTo)
+    return matchStatus && matchDateFrom && matchDateTo
+  })
 
   const mapPoints = filteredOrders
     .filter(o => o.lat && o.lng)
@@ -326,7 +353,7 @@ export default function MapPage() {
       {view === 'orders' && (
       <main className="px-4 md:px-8 py-6 max-w-7xl mx-auto">
         {/* Фильтр статусов */}
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           {['all', 'pending', 'in_transit', 'delivered'].map(s => (
             <button
               key={s}
@@ -343,6 +370,35 @@ export default function MapPage() {
               </span>
             </button>
           ))}
+          <label className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-white text-xs text-gray-500">
+            <span className="whitespace-nowrap">{t('dateFromLabel')}</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-transparent text-sm text-gray-700 focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-white text-xs text-gray-500">
+            <span className="whitespace-nowrap">{t('dateToLabel')}</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="bg-transparent text-sm text-gray-700 focus:outline-none"
+            />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+              }}
+              className="text-sm text-red-500 hover:text-red-700 font-semibold px-2"
+            >
+              {t('reset')}
+            </button>
+          )}
           {selectedOrder && (
             <button
               onClick={() => setSelectedOrder(null)}
@@ -371,6 +427,7 @@ export default function MapPage() {
                   onPointClick={handlePointClick}
                   onBackgroundClick={() => setSelectedOrder(null)}
                   statusColors={STAGE_MARKER_COLOR}
+                  showPopup={false}
                 />
               </div>
             )}
@@ -441,10 +498,30 @@ export default function MapPage() {
                   <span className="text-sm text-gray-500">{t('orderNum')}</span>
                   <span className="font-mono font-bold text-gray-900">{selectedOrder.order_number}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-500">{t('productHeader')}</span>
-                  <span className="text-sm font-medium text-gray-900 text-right max-w-[200px]">{selectedOrder.product_name || '—'}</span>
+                <div className="flex justify-between gap-3">
+                  <span className="text-sm text-gray-500 flex-shrink-0">{t('productHeader')}</span>
+                  <div className="text-right">
+                    <span
+                      className={`text-sm font-medium text-gray-900 ${productExpanded ? '' : 'line-clamp-2'}`}
+                    >
+                      {selectedOrder.product_name || '—'}
+                    </span>
+                    {selectedOrder.product_name && selectedOrder.product_name.length > 40 && (
+                      <button
+                        onClick={() => setProductExpanded((v) => !v)}
+                        className="block ml-auto mt-0.5 text-xs text-red-600 hover:text-red-700 font-semibold"
+                      >
+                        {productExpanded ? t('collapseBtn') : t('showFullBtn')}
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {selectedOrder.product_quantity != null && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-500">{t('quantityLabel')}</span>
+                    <span className="text-sm font-medium text-gray-900">{selectedOrder.product_quantity}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">{t('phone')}</span>
                   <span className="text-sm font-medium text-gray-900">{selectedOrder.client_phone}</span>

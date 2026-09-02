@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin'
 import {
   fetchKaspiOrderEntries,
   formatProductName,
+  sumProductQuantity,
   isValidKaspiToken,
 } from '@/lib/kaspi'
 
@@ -162,8 +163,8 @@ export async function POST(request: NextRequest) {
     const token = tokenBySeller.get(order.seller_id)
     if (!token) return
     try {
-      const names = await fetchKaspiOrderEntries({ token, orderId: order.kaspi_order_id })
-      const productName = formatProductName(names)
+      const entries = await fetchKaspiOrderEntries({ token, orderId: order.kaspi_order_id })
+      const productName = formatProductName(entries)
       // Kaspi не вернул названия для заказа — это не сбой, но записывать нечего.
       // Оставляем NULL (заказ попадёт в remaining); клиент останавливается, когда
       // пачки перестают давать прогресс.
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
 
       const { error: updateError } = await supabase
         .from('orders')
-        .update({ product_name: productName })
+        .update({ product_name: productName, product_quantity: sumProductQuantity(entries) })
         .eq('id', order.id)
 
       if (updateError) throw new Error(updateError.message)

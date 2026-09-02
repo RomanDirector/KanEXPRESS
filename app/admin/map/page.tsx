@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '@/lib/supabase'
+import { applyDateRange } from '@/lib/date-range'
 import type { MapPoint } from '@/components/MapGL'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
@@ -49,6 +50,8 @@ export default function AdminMapPage() {
   const [sellers, setSellers] = useState<SellerOption[]>([])
   const [sellerId, setSellerId] = useState('')
   const [status, setStatus] = useState<StatusFilter>('active')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [points, setPoints] = useState<MapPoint[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -74,6 +77,7 @@ export default function AdminMapPage() {
         .not('lat', 'is', null)
         .not('lng', 'is', null)
       countQuery = applyStatusFilter(countQuery, status)
+      countQuery = applyDateRange(countQuery, dateFrom, dateTo)
       if (sellerId) countQuery = countQuery.eq('seller_id', sellerId)
 
       let rowsQuery = supabase
@@ -84,6 +88,7 @@ export default function AdminMapPage() {
         .order('created_at', { ascending: false })
         .limit(MAP_LIMIT)
       rowsQuery = applyStatusFilter(rowsQuery, status)
+      rowsQuery = applyDateRange(rowsQuery, dateFrom, dateTo)
       if (sellerId) rowsQuery = rowsQuery.eq('seller_id', sellerId)
 
       const [{ count }, { data, error }] = await Promise.all([countQuery, rowsQuery])
@@ -109,7 +114,7 @@ export default function AdminMapPage() {
       setLoading(false)
     }
     load()
-  }, [status, sellerId])
+  }, [status, sellerId, dateFrom, dateTo])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -143,6 +148,35 @@ export default function AdminMapPage() {
               </option>
             ))}
           </select>
+          <label className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 text-xs text-gray-500">
+            <span className="whitespace-nowrap">Стартовая дата</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-transparent text-sm text-gray-700 focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 text-xs text-gray-500">
+            <span className="whitespace-nowrap">Конечная дата</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="bg-transparent text-sm text-gray-700 focus:outline-none"
+            />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+              }}
+              className="text-sm text-red-500 hover:text-red-700 font-semibold px-2"
+            >
+              Сбросить даты
+            </button>
+          )}
           <span className="text-xs text-gray-400 font-medium ml-auto">
             {loading ? 'Загрузка...' : `Показано ${points.length} из ${totalCount}`}
           </span>

@@ -55,6 +55,11 @@ export interface MapGLProps {
   onPointClick?: (point: MapPoint) => void
   // клик по пустому месту карты (не по маркеру) — используется, чтобы снять выделение
   onBackgroundClick?: () => void
+  // Некоторые страницы (например /(seller)/orders-map) показывают свою
+  // собственную панель деталей заказа при клике по точке (через onPointClick) —
+  // в этом случае нативный Leaflet-попап маркера не нужен: без этого флага оба
+  // открывались одновременно поверх друг друга при каждом клике по маркеру.
+  showPopup?: boolean
   // номер остановки (1-based) по id точки — используется для нумерации пинов
   // и построения линии маршрута курьера
   routeOrder?: Record<string, number>
@@ -150,6 +155,7 @@ export function MapGL({
   selectedId,
   onPointClick,
   onBackgroundClick,
+  showPopup = true,
   routeOrder,
   courierPosition,
 }: MapGLProps) {
@@ -166,7 +172,15 @@ export function MapGL({
   }, [validPoints, routeOrder])
 
   return (
-    <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
+    // isolate — Leaflet задаёт своим внутренним элементам (.leaflet-top,
+    // .leaflet-control-container) z-index:1000 в собственном CSS. Без
+    // изолированного стекинг-контекста эти значения сравниваются напрямую с
+    // z-index элементов ВНЕ карты (например, модалок вроде "Детали заказа" на
+    // /(seller)/orders-map, z-50) — и побеждают, перекрывая их сверху, хотя
+    // модалка выше в DOM и должна быть поверх всего. isolate замыкает всю
+    // внутреннюю разметку Leaflet в свой собственный контекст, не давая её
+    // z-index "протекать" наружу.
+    <div className="relative isolate rounded-2xl overflow-hidden" style={{ height }}>
       <MapContainer
         center={center}
         zoom={zoom}
@@ -217,19 +231,21 @@ export function MapGL({
                 click: () => onPointClick?.(point),
               }}
             >
-              <Popup>
-                <div className="text-sm space-y-1">
-                  {stopNumber != null && <p className="font-bold">Остановка {stopNumber}</p>}
-                  <p className="font-mono font-bold">{point.order_number}</p>
-                  {point.seller_name && <p className="font-semibold">{point.seller_name}</p>}
-                  {point.product_name !== undefined && <p>Товар: {point.product_name || '—'}</p>}
-                  <p>{point.client_address}</p>
-                  <p>{point.client_phone}</p>
-                  <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>
-                  <p className="text-gray-500">{point.status}</p>
-                  {point.courier_name !== undefined && <p className="text-gray-500">Курьер: {point.courier_name || '—'}</p>}
-                </div>
-              </Popup>
+              {showPopup && (
+                <Popup>
+                  <div className="text-sm space-y-1">
+                    {stopNumber != null && <p className="font-bold">Остановка {stopNumber}</p>}
+                    <p className="font-mono font-bold">{point.order_number}</p>
+                    {point.seller_name && <p className="font-semibold">{point.seller_name}</p>}
+                    {point.product_name !== undefined && <p>Товар: {point.product_name || '—'}</p>}
+                    <p>{point.client_address}</p>
+                    <p>{point.client_phone}</p>
+                    <p className="font-bold">{(point.price || 0).toLocaleString('ru-RU')} ₸</p>
+                    <p className="text-gray-500">{point.status}</p>
+                    {point.courier_name !== undefined && <p className="text-gray-500">Курьер: {point.courier_name || '—'}</p>}
+                  </div>
+                </Popup>
+              )}
             </Marker>
           )
         })}

@@ -123,7 +123,12 @@ export function mapKaspiStatus(state: string): string {
   return STATUS_MAP[state] ?? 'pending'
 }
 
-export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string, productName: string | null = null) {
+export function mapKaspiOrderToRow(
+  order: KaspiOrder,
+  sellerId: string,
+  productName: string | null = null,
+  productQuantity: number | null = null
+) {
   const phone = order.phoneAlias?.trim() || order.customer?.cellPhone || ''
   return {
     seller_id: sellerId,
@@ -132,6 +137,7 @@ export function mapKaspiOrderToRow(order: KaspiOrder, sellerId: string, productN
     client_phone: phone,
     client_address: order.deliveryAddress?.formattedAddress ?? '',
     product_name: productName,
+    product_quantity: productQuantity,
     price: order.totalPrice ?? 0,
     status: mapKaspiStatus(order.state),
     created_at: new Date(order.creationDate).toISOString(),
@@ -164,19 +170,31 @@ async function kaspiGetJson(token: string, url: string, timeoutMs = 8000): Promi
   return res.json()
 }
 
-// Возвращает список названий товаров заказа. Пустой список — позиций нет или
-// у них нет названия (это не ошибка). Бросает, только если сам запрос упал —
-// вызывающая сторона (kaspi-sync) ловит это и не роняет синк.
+export interface KaspiOrderEntry {
+  name: string
+  // Сколько единиц ЭТОЙ позиции реально заказано (attributes.quantity у
+  // Kaspi). НЕ путать с offer.name — название товара в каталоге само может
+  // содержать текст вроде «, 1 шт» (это фасовка/упаковка конкретного лота,
+  // а не количество в заказе): для товара "Клей ..., 1 шт" с quantity=6
+  // реальный заказ — 6 упаковок, а не 1, хотя название говорит "1 шт".
+  quantity: number
+}
+
+// Возвращает позиции заказа (название + фактическое количество). Пустой
+// список — позиций нет или у них нет названия (это не ошибка). Бросает,
+// только если сам запрос упал — вызывающая сторона (kaspi-sync) ловит это и
+// не роняет синк.
 export async function fetchKaspiOrderEntries({ token, orderId }: {
   token: string
   orderId: string
-}): Promise<string[]> {
+}): Promise<KaspiOrderEntry[]> {
   const json = await kaspiGetJson(token, `${KASPI_API_BASE}/orders/${encodeURIComponent(orderId)}/entries`)
   const entries = Array.isArray(json?.data) ? json.data : []
-  const names: string[] = []
+  const result: KaspiOrderEntry[] = []
 
   for (const entry of entries) {
     const attrs = entry?.attributes ?? {}
+    const quantity = typeof attrs?.quantity === 'number' && attrs.quantity > 0 ? attrs.quantity : 1
     // Название часто приходит прямо в позиции (offer.name) — тогда доп. запрос не нужен.
     const inlineName =
       (typeof attrs?.offer?.name === 'string' && attrs.offer.name) ||
@@ -184,7 +202,7 @@ export async function fetchKaspiOrderEntries({ token, orderId }: {
       (typeof attrs?.name === 'string' && attrs.name) ||
       null
     if (inlineName && inlineName.trim()) {
-      names.push(inlineName.trim())
+      result.push({ name: inlineName.trim(), quantity })
       continue
     }
 
@@ -196,23 +214,35 @@ export async function fetchKaspiOrderEntries({ token, orderId }: {
     try {
       const productJson = await kaspiGetJson(token, productLink)
       const pname = productJson?.data?.attributes?.name
-      if (typeof pname === 'string' && pname.trim()) names.push(pname.trim())
+      if (typeof pname === 'string' && pname.trim()) result.push({ name: pname.trim(), quantity })
     } catch (err) {
       // Одна недокачанная позиция не должна ронять весь заказ — пропускаем её.
       console.error(`[kaspi] заказ ${orderId}: не удалось получить товар по ссылке позиции`, err)
     }
   }
 
-  return names
+  return result
 }
 
-// Короткая строка названия товара для накладной: одно название целиком либо
-// «первое и ещё N» — чтобы влезало в накладную при нескольких позициях.
-export function formatProductName(names: string[]): string | null {
-  const clean = names.map((n) => n.trim()).filter(Boolean)
+// Название товара целиком (без обрезки длины) — одно название либо «первое и
+// ещё N», когда позиций несколько. Раньше здесь же обрезали строку до 60
+// символов и дописывали «× N» — из-за обрезки в БД сохранялась уже усечённая
+// строка, и «развернуть полностью» в UI было нечего показывать (текста после
+// «…» просто не существовало). Обрезка под физическое место на накладной —
+// теперь забота рендера накладной (lib/invoice-plan.ts), а количество —
+// отдельное поле orders.product_quantity (см. sumProductQuantity ниже).
+export function formatProductName(entries: KaspiOrderEntry[]): string | null {
+  const clean = entries.filter((e) => e.name && e.name.trim())
   if (clean.length === 0) return null
-  const first = clean[0].length > 60 ? `${clean[0].slice(0, 57)}…` : clean[0]
+  const first = clean[0].name
   return clean.length === 1 ? first : `${first} и ещё ${clean.length - 1}`
+}
+
+// Суммарное количество единиц по всем позициям заказа — отдельное поле
+// orders.product_quantity, показывается отдельной строкой "Количество: N" в UI.
+export function sumProductQuantity(entries: KaspiOrderEntry[]): number | null {
+  if (entries.length === 0) return null
+  return entries.reduce((sum, e) => sum + e.quantity, 0)
 }
 export async function requestDeliveryCode({ token, kaspiOrderId, orderCode }: {
   token: string; kaspiOrderId: string; orderCode: string

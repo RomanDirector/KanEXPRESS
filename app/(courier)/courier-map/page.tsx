@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Package, Truck, CheckCircle, RotateCcw, MapPin, Phone, Navigation, Ban } from 'lucide-react'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
+import { dayStartMs, dayEndMs } from '@/lib/date-range'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -105,6 +106,8 @@ export default function CourierMapPage() {
   const [warehouses, setWarehouses] = useState<WarehousePoint[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<DisplayStage | 'all'>('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [courierPos, setCourierPos] = useState<LatLng | null>(null)
 
@@ -232,8 +235,13 @@ export default function CourierMapPage() {
     return { orderedOrders: [...sequence, ...unroutable], routeIndexById }
   }, [orders, routeStart])
 
-  const filteredOrders =
-    filter === 'all' ? orderedOrders : orderedOrders.filter((o) => getDisplayStage(o) === filter)
+  const filteredOrders = orderedOrders.filter((o) => {
+    const matchStage = filter === 'all' || getDisplayStage(o) === filter
+    const createdTime = new Date(o.created_at).getTime()
+    const matchDateFrom = !dateFrom || createdTime >= dayStartMs(dateFrom)
+    const matchDateTo = !dateTo || createdTime <= dayEndMs(dateTo)
+    return matchStage && matchDateFrom && matchDateTo
+  })
 
   const points: MapPoint[] = filteredOrders.map((o) => ({
     id: o.id,
@@ -277,6 +285,29 @@ export default function CourierMapPage() {
               </Button>
             )
           })}
+          <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">Стартовая дата</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="bg-transparent text-sm text-foreground focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-1.5 text-xs text-muted-foreground">
+            <span className="whitespace-nowrap">Конечная дата</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="bg-transparent text-sm text-foreground focus:outline-none"
+            />
+          </label>
+          {(dateFrom || dateTo) && (
+            <Button size="sm" variant="outline" onClick={() => { setDateFrom(''); setDateTo('') }}>
+              Сбросить даты
+            </Button>
+          )}
           {selectedId && (
             <Button size="sm" variant="outline" className="ml-auto" onClick={() => setSelectedId(null)}>
               Сбросить выделение

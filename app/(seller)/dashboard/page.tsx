@@ -15,27 +15,13 @@ import { getSellerCourierIds } from '@/lib/couriers'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 import { Toast } from '@/components/Toast'
 import { generatePDF } from '@/lib/invoice-pdf'
+import { dayStartMs, dayEndMs, applyDateRange } from '@/lib/date-range'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 const PAGE_SIZE = 15
 const ORDER_COLUMNS =
   'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name'
-
-// Границы дня для фильтров "Стартовая/Конечная дата" считаем в часовом поясе
-// Алматы (UTC+5, без перехода на летнее время в Казахстане), а не в UTC.
-// created_at хранится в UTC, а `new Date('2026-08-26')` парсится как UTC-полночь —
-// это на 5 часов раньше полуночи в Алматы, из-за чего конечная граница дня
-// "26 августа" на самом деле доходила до 04:59 утра 27 августа по местному
-// времени, и заказы, которые продавец видит датированными 27-м, попадали в
-// диапазон, а самые ранние заказы 25-го (до 05:00 местного) — выпадали.
-const KZ_UTC_OFFSET = '+05:00'
-function dayStartMs(dateStr: string): number {
-  return new Date(`${dateStr}T00:00:00${KZ_UTC_OFFSET}`).getTime()
-}
-function dayEndMs(dateStr: string): number {
-  return new Date(`${dateStr}T23:59:59.999${KZ_UTC_OFFSET}`).getTime()
-}
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 type Tab = 'active' | 'cancelled' | 'archive'
@@ -104,7 +90,7 @@ const STAGE_ICON: Record<DisplayStage, React.ReactNode> = {
 async function fetchInvoiceOrders(sellerId: string, ids?: string[]) {
   let query = supabase
     .from('orders')
-    .select('id, order_number, client_phone, client_address, status, price, created_at, product_name, zone_id, zones ( name, display_number )')
+    .select('id, order_number, client_phone, client_address, status, price, created_at, product_name, product_quantity, zone_id, zones ( name, display_number )')
     .eq('seller_id', sellerId)
     .order('created_at', { ascending: false })
   if (ids && ids.length > 0) query = query.in('id', ids)
@@ -306,17 +292,6 @@ function ActiveOrdersTab({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [photoOrder])
 
-  // Общая точка применения диапазона дат — счётчики (fetchStatCounts) и список
-  // (fetchOrdersPage) должны фильтровать created_at строго одинаково, иначе
-  // цифра "N из M" и сам список расходятся (баг: список раньше вообще не знал
-  // про даты и фильтровал их только по уже загруженной странице в памяти).
-  function applyDateRange<T extends { gte: any; lte: any }>(query: T, from: string, to: string): T {
-    let q = query
-    if (from) q = q.gte('created_at', new Date(dayStartMs(from)).toISOString())
-    if (to) q = q.lte('created_at', new Date(dayEndMs(to)).toISOString())
-    return q
-  }
-
   async function fetchOrdersPage(
     currentSellerId: string,
     pageIndex: number,
@@ -392,23 +367,12 @@ function ActiveOrdersTab({
     filtersRef.current = { dateFrom, dateTo, filterStatus }
   }, [dateFrom, dateTo, filterStatus])
 
+  // Только подписка на realtime — заведена отдельно от загрузки данных
+  // (ниже) и держится на [sellerId], а не на фильтрах: иначе на каждое
+  // изменение даты/статуса пришлось бы пересоздавать канал. Актуальные
+  // фильтры для колбэка берутся из filtersRef, а не из замыкания.
   useEffect(() => {
     if (!sellerId) return
-    let cancelled = false
-    setLoading(true)
-    Promise.all([
-      fetchOrdersPage(
-        sellerId,
-        0,
-        true,
-        filtersRef.current.dateFrom,
-        filtersRef.current.dateTo,
-        filtersRef.current.filterStatus
-      ),
-      fetchStatCounts(sellerId, filtersRef.current.dateFrom, filtersRef.current.dateTo),
-    ]).then(() => {
-      if (!cancelled) setLoading(false)
-    })
     const channel = supabase
       .channel('orders-realtime')
       .on(
@@ -429,23 +393,27 @@ function ActiveOrdersTab({
       .subscribe()
 
     return () => {
-      cancelled = true
       supabase.removeChannel(channel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId])
 
-  // Смена дат ИЛИ статуса-карточки должна одинаково перезапускать И счётчики,
-  // И список — иначе они расходятся: список раньше не перезапрашивался, а
-  // просто фильтровал клиентски то, что уже было в памяти (первую страницу
-  // общей, не отфильтрованной по статусу пагинации).
+  // Загрузка списка и счётчиков — один эффект и на первое открытие страницы
+  // (sellerId появился), и на смену дат/статуса-карточки. Раньше это были
+  // два отдельных эффекта, оба с sellerId в зависимостях — при появлении
+  // sellerId срабатывали оба разом, и список с счётчиками грузились дважды.
   useEffect(() => {
     if (!sellerId) return
+    let cancelled = false
     setLoading(true)
     Promise.all([
       fetchOrdersPage(sellerId, 0, true, dateFrom, dateTo, filterStatus),
       fetchStatCounts(sellerId, dateFrom, dateTo),
-    ]).then(() => setLoading(false))
+    ]).then(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId, dateFrom, dateTo, filterStatus])
 
