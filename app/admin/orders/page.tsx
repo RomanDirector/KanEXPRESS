@@ -255,7 +255,7 @@ export default function AdminOrdersPage() {
                     return (
                       <tr key={o.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-4 font-mono font-bold text-gray-900">{o.order_number}</td>
-                        <td className="px-4 py-4 text-gray-600 max-w-[200px] truncate">{o.product_name || '—'}</td>
+                        <td className="px-4 py-4 text-gray-600 max-w-[200px] whitespace-normal break-words">{o.product_name || '—'}</td>
                         <td className="px-4 py-4 text-gray-600">{o.sellers?.organization_name || '—'}</td>
                         <td className="px-4 py-4 text-gray-600">{o.courier_name || '—'}</td>
                         <td className="px-4 py-4">

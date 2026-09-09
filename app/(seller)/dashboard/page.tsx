@@ -15,7 +15,7 @@ import { getSellerCourierIds } from '@/lib/couriers'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 import { Toast } from '@/components/Toast'
 import { generatePDF } from '@/lib/invoice-pdf'
-import { dayStartMs, dayEndMs, applyDateRange } from '@/lib/date-range'
+import { dayStartMs, dayEndMs, applyDateRange, todayInAlmaty } from '@/lib/date-range'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -31,6 +31,21 @@ const PAGE_SIZE = 15
 const DISTRIBUTE_BATCH_SIZE = 300
 const ORDER_COLUMNS =
   'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name'
+
+// Дефолт вкладки "Активные" (без явно выбранного диапазона дат) — заказы,
+// у которых СЕГОДНЯ дата поступления (created_at) ИЛИ СЕГОДНЯ плановая дата
+// доставки Kaspi (planned_delivery_date) — объединение, не пересечение:
+// то, что пришло раньше, но везти именно сегодня, не должно потеряться.
+// Явный выбор дат в фильтре продолжает работать по created_at, как раньше.
+function applyOrdersDateFilter<T extends { gte: any; lte: any; or: any }>(query: T, from: string, to: string): T {
+  if (from || to) return applyDateRange(query, from, to)
+  const today = todayInAlmaty()
+  const startIso = new Date(dayStartMs(today)).toISOString()
+  const endIso = new Date(dayEndMs(today)).toISOString()
+  return query.or(
+    `and(created_at.gte.${startIso},created_at.lte.${endIso}),and(planned_delivery_date.gte.${startIso},planned_delivery_date.lte.${endIso})`
+  )
+}
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
 type Tab = 'active' | 'cancelled' | 'archive'
@@ -317,7 +332,7 @@ function ActiveOrdersTab({
       .eq('seller_id', currentSellerId)
       .neq('courier_stage', 'cancelled')
       .order('created_at', { ascending: false })
-    query = applyDateRange(query, from, to)
+    query = applyOrdersDateFilter(query, from, to)
     // Раньше статус фильтровался только клиентски, над уже загруженной страницей —
     // если среди самых свежих PAGE_SIZE строк не было ни одной нужного статуса
     // (а их могут быть сотни где-то дальше по пагинации), список показывал 0,
@@ -350,7 +365,7 @@ function ActiveOrdersTab({
           .eq('seller_id', currentSellerId)
           .eq('status', status)
           .neq('courier_stage', 'cancelled')
-        query = applyDateRange(query, from, to)
+        query = applyOrdersDateFilter(query, from, to)
         return query
       })
     )
@@ -913,6 +928,9 @@ function ActiveOrdersTab({
           </button>
         )}
       </div>
+      {!dateFrom && !dateTo && (
+        <p className="text-xs text-gray-400 -mt-2 mb-4 px-1">{t('defaultTodayFilterHint')}</p>
+      )}
 
       {/* Таблица */}
       {loading ? (
@@ -967,9 +985,9 @@ function ActiveOrdersTab({
                       />
                     </td>
                     <td className="px-4 py-4 font-mono font-bold text-gray-900">{order.order_number}</td>
-                    <td className="px-4 py-4 text-gray-600 max-w-[200px] truncate">{order.product_name || '—'}</td>
+                    <td className="px-4 py-4 text-gray-600 max-w-[200px] whitespace-normal break-words">{order.product_name || '—'}</td>
                     <td className="px-4 py-4 text-gray-600">{order.client_phone}</td>
-                    <td className="px-4 py-4 text-gray-500 max-w-[160px] truncate">{order.client_address}</td>
+                    <td className="px-4 py-4 text-gray-500 max-w-[220px] whitespace-normal break-words">{order.client_address}</td>
                     <td className="px-4 py-4 font-bold text-gray-900">{(order.price || 0).toLocaleString(locale)} ₸</td>
                     <td className="px-4 py-4 text-gray-600 text-xs">{order.courier_name || '—'}</td>
                     <td className="px-4 py-4">
@@ -1302,7 +1320,7 @@ function CancelledOrdersTab({
                 {filtered.map((order) => (
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-4 font-mono font-bold text-gray-900">{order.order_number}</td>
-                    <td className="px-5 py-4 text-gray-500 max-w-[220px] truncate">{order.client_address}</td>
+                    <td className="px-5 py-4 text-gray-500 max-w-[220px] whitespace-normal break-words">{order.client_address}</td>
                     <td className="px-5 py-4 text-gray-600 max-w-[240px] truncate">{order.cancel_reason || '—'}</td>
                     <td className="px-5 py-4">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border border-red-200 bg-red-50 text-red-700">

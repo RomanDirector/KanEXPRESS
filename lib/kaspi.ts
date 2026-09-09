@@ -24,7 +24,13 @@ export interface KaspiOrder {
   id: string
   code: string
   state: string
+  // Реальный жизненный цикл заказа — отдельное от state поле (см. mapKaspiOrderState
+  // ниже). Проверено на живых данных продавца: у 98% заказов state='ARCHIVE' и
+  // единственное, что различает доставлен/отменён/возвращён — именно status.
+  status?: string
+  cancellationReason?: string
   creationDate: number
+  plannedDeliveryDate?: number
   totalPrice?: number
   phoneAlias?: string
   customer?: { cellPhone?: string }
@@ -111,16 +117,52 @@ export async function fetchKaspiOrdersRaw({
   return body
 }
 
-const STATUS_MAP: Record<string, string> = {
-  ACCEPTED_BY_MERCHANT: 'pending',
-  ASSEMBLE: 'pending',
-  KASPI_DELIVERY: 'in_transit',
-  DELIVERY: 'in_transit',
-  COMPLETED: 'delivered',
+// state описывает канал доставки (самовывоз/своя доставка/Kaspi Доставка),
+// а не завершённость заказа — проверено на живых данных: KASPI_DELIVERY/DELIVERY
+// это единственные state-значения, которые реально означают "в пути" у этого
+// продавца. Раньше это была единственная база для статуса; теперь она остаётся
+// базой только для НЕтерминальных заказов (см. mapKaspiOrderState) — реальный
+// признак "доставлен/отменён/возвращён" даёт status, не state.
+function baseStatusFromState(state: string): 'pending' | 'in_transit' {
+  return state === 'KASPI_DELIVERY' || state === 'DELIVERY' ? 'in_transit' : 'pending'
 }
 
-export function mapKaspiStatus(state: string): string {
-  return STATUS_MAP[state] ?? 'pending'
+// Человекочитаемые причины отмены Kaspi (order.cancellationReason — машинный
+// код, не готовый текст). Список неполный: в живых данных этого продавца
+// встретился только BUYER_CANCELLATION_HIMSELF — остальные коды Kaspi нигде
+// не документирует публично, поэтому непереведённый код возвращаем как есть
+// (лучше показать сырой код, чем потерять информацию о причине).
+const KASPI_CANCEL_REASON_LABEL: Record<string, string> = {
+  BUYER_CANCELLATION_HIMSELF: 'Покупатель отменил заказ',
+}
+
+export interface MappedKaspiOrderState {
+  status: 'pending' | 'in_transit' | 'delivered'
+  // null — заказ ещё не в терминальном для нас состоянии, courier_stage
+  // трогать не нужно (иначе синк затрёт реальный прогресс курьера в приложении).
+  courierStage: 'cancelled' | 'returned' | null
+  cancelReason: string | null
+}
+
+// order.status — реальный жизненный цикл заказа на стороне Kaspi (см.
+// KaspiOrder.status). COMPLETED/CANCELLED/RETURNED — терминальные значения,
+// state в этот момент у Kaspi всегда 'ARCHIVE' и сам по себе уже ничего не
+// говорит о причине завершения.
+export function mapKaspiOrderState(order: KaspiOrder): MappedKaspiOrderState {
+  if (order.status === 'COMPLETED') {
+    return { status: 'delivered', courierStage: null, cancelReason: null }
+  }
+  if (order.status === 'CANCELLED') {
+    const reason = order.cancellationReason
+      ? KASPI_CANCEL_REASON_LABEL[order.cancellationReason] ?? order.cancellationReason
+      : null
+    return { status: baseStatusFromState(order.state), courierStage: 'cancelled', cancelReason: reason }
+  }
+  if (order.status === 'RETURNED' || order.status === 'KASPI_DELIVERY_RETURN_REQUESTED') {
+    return { status: baseStatusFromState(order.state), courierStage: 'returned', cancelReason: null }
+  }
+  // APPROVED_BY_BANK, ACCEPTED_BY_MERCHANT, CANCELLING и всё незнакомое — переходные.
+  return { status: baseStatusFromState(order.state), courierStage: null, cancelReason: null }
 }
 
 export function mapKaspiOrderToRow(
@@ -130,6 +172,7 @@ export function mapKaspiOrderToRow(
   productQuantity: number | null = null
 ) {
   const phone = order.phoneAlias?.trim() || order.customer?.cellPhone || ''
+  const mapped = mapKaspiOrderState(order)
   return {
     seller_id: sellerId,
     kaspi_order_id: order.id,
@@ -139,11 +182,21 @@ export function mapKaspiOrderToRow(
     product_name: productName,
     product_quantity: productQuantity,
     price: order.totalPrice ?? 0,
-    status: mapKaspiStatus(order.state),
+    status: mapped.status,
     created_at: new Date(order.creationDate).toISOString(),
+    planned_delivery_date: order.plannedDeliveryDate ? new Date(order.plannedDeliveryDate).toISOString() : null,
     lat: order.deliveryAddress?.latitude ?? null,
     lng: order.deliveryAddress?.longitude ?? null,
     is_kaspi_delivery: order.isKaspiDelivery ?? false,
+    // courier_stage/cancel_reason/cancelled_by/cancelled_at сюда намеренно НЕ
+    // попадают — этот row идёт в общий bulk-upsert, где затирает поля у уже
+    // существующих заказов безусловно. Если писать сюда courier_stage прямо
+    // тут, то и очередной обычный ресинк уже идущего в приложении заказа
+    // сбрасывал бы реальный прогресс курьера (dropped/departed/arrived...)
+    // обратно на 'not_started'. Терминальные courier_stage применяются
+    // отдельным guarded UPDATE после апсерта — см. applyKaspiTerminalState в
+    // lib/kaspi-sync.ts (WHERE courier_stage='not_started', чтобы не
+    // затирать уже начатую в приложении доставку).
   }
 }
 

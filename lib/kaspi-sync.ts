@@ -5,7 +5,9 @@ import {
   formatProductName,
   sumProductQuantity,
   mapKaspiOrderToRow,
+  mapKaspiOrderState,
   isValidKaspiToken,
+  type KaspiOrder,
 } from './kaspi'
 import { assignZoneIdsForSeller } from './zone-match'
 
@@ -13,6 +15,7 @@ import { assignZoneIdsForSeller } from './zone-match'
 // поэтому качаем позиции пачками с ограничением параллелизма, чтобы не упереться
 // в таймауты/лимиты Kaspi при большом окне заказов.
 const ENTRIES_CONCURRENCY = 6
+const TERMINAL_UPDATE_CONCURRENCY = 10
 
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length)
@@ -41,6 +44,48 @@ async function resolveProductInfo(
     console.error(`[kaspi-sync] заказ ${orderId}: не удалось получить позиции товара`, err)
     return { name: null, quantity: null }
   }
+}
+
+// Терминальные courier_stage ('cancelled'/'returned') от Kaspi применяются
+// ОТДЕЛЬНЫМ guarded UPDATE после общего апсерта, а не прямо в mapKaspiOrderToRow —
+// см. комментарий там же. Гвард `courier_stage='not_started'` — если курьер в
+// приложении уже сам продвинул заказ (dropped/departed/arrived/delivered/...),
+// сигнал от Kaspi не должен затирать его реальный прогресс.
+async function applyKaspiTerminalStates(
+  supabase: ReturnType<typeof createAdminClient>,
+  kaspiOrders: KaspiOrder[],
+  upsertedRows: { id: string; order_number: string }[]
+): Promise<void> {
+  const byOrderNumber = new Map(kaspiOrders.map((o) => [o.code, o]))
+  const targets = upsertedRows
+    .map((row) => {
+      const kaspiOrder = byOrderNumber.get(row.order_number)
+      if (!kaspiOrder) return null
+      const mapped = mapKaspiOrderState(kaspiOrder)
+      if (!mapped.courierStage) return null
+      return { id: row.id, courierStage: mapped.courierStage, cancelReason: mapped.cancelReason }
+    })
+    .filter((x): x is { id: string; courierStage: 'cancelled' | 'returned'; cancelReason: string | null } => x !== null)
+
+  if (targets.length === 0) return
+
+  await mapWithConcurrency(targets, TERMINAL_UPDATE_CONCURRENCY, async (target) => {
+    const update: Record<string, unknown> = { courier_stage: target.courierStage }
+    // cancel_reason/cancelled_by/cancelled_at — только для реальной отмены,
+    // как в собственном флоу отмены курьера (courier-dashboard). Для
+    // 'returned' наш же курьерский флоу их не проставляет — не выдумываем лишнее.
+    if (target.courierStage === 'cancelled') {
+      update.cancel_reason = target.cancelReason
+      update.cancelled_by = 'kaspi'
+      update.cancelled_at = new Date().toISOString()
+    }
+    const { error } = await supabase
+      .from('orders')
+      .update(update)
+      .eq('id', target.id)
+      .eq('courier_stage', 'not_started')
+    if (error) console.error('[kaspi-sync] ошибка применения terminal-статуса Kaspi', target.id, error)
+  })
 }
 
 // Импорты относительные (не через алиас '@/lib/...'), т.к. этот модуль
@@ -121,7 +166,7 @@ export async function syncKaspiOrders(sellerId?: string): Promise<SellerSyncResu
         const { data: upsertedRows, error: upsertError } = await supabase
           .from('orders')
           .upsert(rows, { onConflict: 'seller_id,order_number' })
-          .select('id')
+          .select('id, order_number')
 
         if (upsertError) throw new Error(upsertError.message)
 
@@ -137,6 +182,14 @@ export async function syncKaspiOrders(sellerId?: string): Promise<SellerSyncResu
           await assignZoneIdsForSeller(supabase, seller.id, { orderIds })
         } catch (zoneErr) {
           console.error(`[kaspi-sync] продавец ${seller.id}: ошибка авто-присвоения зон`, zoneErr)
+        }
+
+        // Отменённые/возвращённые на Kaspi заказы из ЭТОГО синка — см.
+        // applyKaspiTerminalStates. Тоже не должно ронять синк заказов.
+        try {
+          await applyKaspiTerminalStates(supabase, kaspiOrders, upsertedRows ?? [])
+        } catch (terminalErr) {
+          console.error(`[kaspi-sync] продавец ${seller.id}: ошибка применения terminal-статусов Kaspi`, terminalErr)
         }
       }
 

@@ -16,6 +16,13 @@ export function dayEndMs(dateStr: string): number {
   return new Date(`${dateStr}T23:59:59.999${KZ_UTC_OFFSET}`).getTime()
 }
 
+// "Сегодня" в Алматы (UTC+5, без перехода на летнее время) — просто сдвигаем
+// текущий UTC-момент на +5ч и берём календарную дату: это даёт корректный
+// локальный день на любой момент суток без библиотек часовых поясов.
+export function todayInAlmaty(): string {
+  return new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
 // Применяет диапазон дат к Supabase-запросу по колонке created_at. Пустая
 // строка ('') для from/to означает "без границы" — совпадает с поведением
 // пустого значения <input type="date">.
