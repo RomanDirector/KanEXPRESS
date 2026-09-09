@@ -20,6 +20,15 @@ import { dayStartMs, dayEndMs, applyDateRange } from '@/lib/date-range'
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
 const PAGE_SIZE = 15
+// Кап на один клик "Распределить" — раньше запрос без .range() молча
+// обрезался PostgREST на 1000 строк (без ошибки и без предупреждения), а
+// WhatsApp-уведомления и reload после распределения считались от этого
+// необрезанного списка. На backlog в тысячи заказов это грозило открыть
+// сотни-тысячи WhatsApp-вкладок и подвесить вкладку до перезагрузки на
+// много минут. Явный маленький кап + видимый остаток — временное решение;
+// zone-aware распределение (обход круга по зоне заказа, не по всем
+// курьерам продавца подряд) — отдельная задача следующим шагом.
+const DISTRIBUTE_BATCH_SIZE = 300
 const ORDER_COLUMNS =
   'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name'
 
@@ -306,13 +315,19 @@ function ActiveOrdersTab({
       .from('orders')
       .select(ORDER_COLUMNS)
       .eq('seller_id', currentSellerId)
+      .neq('courier_stage', 'cancelled')
       .order('created_at', { ascending: false })
     query = applyDateRange(query, from, to)
     // Раньше статус фильтровался только клиентски, над уже загруженной страницей —
     // если среди самых свежих PAGE_SIZE строк не было ни одной нужного статуса
     // (а их могут быть сотни где-то дальше по пагинации), список показывал 0,
     // хотя счётчик (fetchStatCounts, серверный) честно считал сотни совпадений.
+    // Отменённые заказы (courier_stage='cancelled') всегда исключены выше —
+    // они живут на отдельной вкладке "Отменённые" независимо от status.
+    // Доставленные исключаем только во вью "все" — карточка "Доставлено"
+    // должна по-прежнему показывать их по клику.
     if (status !== 'all') query = query.eq('status', status)
+    else query = query.neq('status', 'delivered')
     const { data, error } = await query.range(rangeFrom, rangeTo)
     if (error) {
       console.error(error.message)
@@ -334,6 +349,7 @@ function ActiveOrdersTab({
           .select('id', { count: 'exact', head: true })
           .eq('seller_id', currentSellerId)
           .eq('status', status)
+          .neq('courier_stage', 'cancelled')
         query = applyDateRange(query, from, to)
         return query
       })
@@ -536,12 +552,39 @@ function ActiveOrdersTab({
     if (!sellerId) return
     setDistributing(true)
 
+    // Сколько всего заказов ждёт распределения — отдельным head-запросом
+    // (без .range() он не грузит строки, только count), чтобы после батча
+    // показать честный остаток, а не только "распределено N".
+    const { count: totalPendingCount, error: countError } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('seller_id', sellerId)
+      .eq('status', 'pending')
+      .is('courier_name', null)
+    if (countError) {
+      console.error(countError)
+      onToast({ message: t('loadErrorPrefix') + countError.message, type: 'error' })
+      setDistributing(false)
+      return
+    }
+    if (!totalPendingCount) {
+      alert(t('noOrdersForDistribution'))
+      setDistributing(false)
+      return
+    }
+
+    // Один клик обрабатывает не весь backlog, а ограниченную пачку —
+    // см. DISTRIBUTE_BATCH_SIZE. Сортировка по created_at делает повторные
+    // клики предсказуемыми: каждый следующий забирает следующую пачку
+    // самых старых нераспределённых заказов, а не случайный/недетерминированный срез.
     const { data: pendingOrdersData, error: pendingError } = await supabase
       .from('orders')
       .select('id, order_number, client_phone')
       .eq('seller_id', sellerId)
       .eq('status', 'pending')
       .is('courier_name', null)
+      .order('created_at', { ascending: true })
+      .range(0, DISTRIBUTE_BATCH_SIZE - 1)
     if (pendingError) {
       console.error(pendingError)
       onToast({ message: t('loadErrorPrefix') + pendingError.message, type: 'error' })
@@ -596,6 +639,9 @@ function ActiveOrdersTab({
     }
     if (hadError) onToast({ message: t('saveErrorGeneric'), type: 'error' })
 
+    // WhatsApp открывается только на реально распределённую пачку (максимум
+    // DISTRIBUTE_BATCH_SIZE вкладок), а не на весь backlog — заказы за
+    // пределами пачки в distributed не попадают вообще.
     distributed.forEach((order, i) => {
       setTimeout(() => {
         const text = waTemplates.order_in_transit({ number: order.order_number })
@@ -603,7 +649,13 @@ function ActiveOrdersTab({
       }, i * 700)
     })
     if (distributed.length > 0 && !hadError) {
-      onToast({ message: t('waSentMsg'), type: 'success' })
+      const remaining = Math.max(totalPendingCount - distributed.length, 0)
+      onToast({
+        message: t('distributedBatchResultMsg')
+          .replace('{distributed}', String(distributed.length))
+          .replace('{remaining}', String(remaining)),
+        type: 'success',
+      })
     }
 
     setDistributing(false)
@@ -988,7 +1040,7 @@ function ActiveOrdersTab({
         <p className="text-xs text-gray-400 font-medium">
           {t('shown')} {filtered.length} {t('of')}{' '}
           {filterStatus === 'all'
-            ? statCounts.pending + statCounts.in_transit + statCounts.delivered
+            ? statCounts.pending + statCounts.in_transit
             : statCounts[filterStatus]}{' '}
           {t('orders')}
         </p>
