@@ -15,7 +15,7 @@ import { getSellerCourierIds } from '@/lib/couriers'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
 import { Toast } from '@/components/Toast'
 import { generatePDF } from '@/lib/invoice-pdf'
-import { dayStartMs, dayEndMs, applyDateRange, todayInAlmaty } from '@/lib/date-range'
+import { dayStartMs, dayEndMs, todayInAlmaty } from '@/lib/date-range'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
 
@@ -30,21 +30,29 @@ const PAGE_SIZE = 15
 // курьерам продавца подряд) — отдельная задача следующим шагом.
 const DISTRIBUTE_BATCH_SIZE = 300
 const ORDER_COLUMNS =
-  'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name'
+  'id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, comment, lat, lng, photo_url, created_at, dropped_at, accepted_at, product_name, planned_delivery_date'
 
-// Дефолт вкладки "Активные" (без явно выбранного диапазона дат) — заказы,
-// у которых СЕГОДНЯ дата поступления (created_at) ИЛИ СЕГОДНЯ плановая дата
-// доставки Kaspi (planned_delivery_date) — объединение, не пересечение:
-// то, что пришло раньше, но везти именно сегодня, не должно потеряться.
-// Явный выбор дат в фильтре продолжает работать по created_at, как раньше.
+// Заказы, у которых дата поступления (created_at) ИЛИ плановая дата доставки
+// Kaspi (planned_delivery_date) попадает в выбранный диапазон — объединение,
+// не пересечение: то, что пришло раньше, но везти именно в этот день, не
+// должно теряться. Без явного диапазона дат (дефолт вкладки "Активные") —
+// диапазон "сегодня" в Алматы. Раньше явный выбор дат в фильтре сравнивался
+// только с created_at — заказы, давно созданные, но с плановой доставкой
+// внутри выбранного диапазона, из-за этого пропадали из списка (0 совпадений
+// при явном диапазоне дат доставки, хотя счётчики в Kaspi показывали сотни).
 function applyOrdersDateFilter<T extends { gte: any; lte: any; or: any }>(query: T, from: string, to: string): T {
-  if (from || to) return applyDateRange(query, from, to)
-  const today = todayInAlmaty()
-  const startIso = new Date(dayStartMs(today)).toISOString()
-  const endIso = new Date(dayEndMs(today)).toISOString()
-  return query.or(
-    `and(created_at.gte.${startIso},created_at.lte.${endIso}),and(planned_delivery_date.gte.${startIso},planned_delivery_date.lte.${endIso})`
-  )
+  const useToday = !from && !to
+  const rangeFrom = useToday ? todayInAlmaty() : from
+  const rangeTo = useToday ? todayInAlmaty() : to
+  const startIso = rangeFrom ? new Date(dayStartMs(rangeFrom)).toISOString() : null
+  const endIso = rangeTo ? new Date(dayEndMs(rangeTo)).toISOString() : null
+  const clause = (column: string) => {
+    const parts: string[] = []
+    if (startIso) parts.push(`${column}.gte.${startIso}`)
+    if (endIso) parts.push(`${column}.lte.${endIso}`)
+    return parts.length > 1 ? `and(${parts.join(',')})` : parts[0]
+  }
+  return query.or(`${clause('created_at')},${clause('planned_delivery_date')}`)
 }
 
 type OrderStatus = 'pending' | 'in_transit' | 'delivered'
@@ -68,6 +76,7 @@ interface Order {
   dropped_at: string | null
   accepted_at: string | null
   product_name: string | null
+  planned_delivery_date: string | null
 }
 
 interface ExportRow {
@@ -450,14 +459,19 @@ function ActiveOrdersTab({
 
   const filtered = orders.filter((o) => {
     const matchStatus = filterStatus === 'all' || o.status === filterStatus
+    // Как и серверный запрос (applyOrdersDateFilter) — совпадение по дате
+    // создания ИЛИ по плановой дате доставки Kaspi, не пересечение.
     const createdTime = new Date(o.created_at).getTime()
-    const matchDateFrom = !dateFrom || createdTime >= dayStartMs(dateFrom)
-    const matchDateTo = !dateTo || createdTime <= dayEndMs(dateTo)
+    const inCreatedRange = (!dateFrom || createdTime >= dayStartMs(dateFrom)) && (!dateTo || createdTime <= dayEndMs(dateTo))
+    const plannedTime = o.planned_delivery_date ? new Date(o.planned_delivery_date).getTime() : null
+    const inPlannedRange =
+      plannedTime != null && (!dateFrom || plannedTime >= dayStartMs(dateFrom)) && (!dateTo || plannedTime <= dayEndMs(dateTo))
+    const matchDate = (!dateFrom && !dateTo) || inCreatedRange || inPlannedRange
     const matchSearch =
       o.order_number.toLowerCase().includes(search.toLowerCase()) ||
       o.client_phone.includes(search) ||
       o.client_address.toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchDateFrom && matchDateTo && matchSearch
+    return matchStatus && matchDate && matchSearch
   })
 
   useEffect(() => {
