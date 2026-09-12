@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import type { Html5Qrcode } from 'html5-qrcode'
 import { supabase } from '@/lib/supabase'
 import { Toast } from '@/components/Toast'
@@ -22,6 +23,19 @@ interface BoxRow {
   label: string
 }
 
+interface BoxScanResult {
+  box: BoxRow
+  zoneName: string
+  courierName: string
+  pendingIds: string[]
+  alreadyCount: number
+}
+
+interface BoxNoCourier {
+  box: BoxRow
+  zoneName: string | null
+}
+
 const READER_ID = 'admin-scan-qr-reader-region'
 
 export default function AdminScanPage() {
@@ -34,7 +48,11 @@ export default function AdminScanPage() {
   const [boxes, setBoxes] = useState<BoxRow[]>([])
   const [selectedBoxId, setSelectedBoxId] = useState('')
   const [confirming, setConfirming] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' } | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'success'; actionLabel?: string; actionHref?: string } | null>(null)
+
+  const [boxResult, setBoxResult] = useState<BoxScanResult | null>(null)
+  const [boxNoCourier, setBoxNoCourier] = useState<BoxNoCourier | null>(null)
+  const [assigningBox, setAssigningBox] = useState(false)
 
   const scannerRef = useRef<Html5Qrcode | null>(null)
 
@@ -52,6 +70,8 @@ export default function AdminScanPage() {
     setAlreadyDropped(false)
     setBoxes([])
     setSelectedBoxId('')
+    setBoxResult(null)
+    setBoxNoCourier(null)
   }
 
   async function stopScanner() {
@@ -92,7 +112,7 @@ export default function AdminScanPage() {
         { fps: 10, qrbox: 250 },
         (decodedText: string) => {
           stopScanner()
-          lookupOrder(extractOrderNumber(decodedText))
+          handleDecoded(extractOrderNumber(decodedText))
         },
         () => {
           // ошибка распознавания одного кадра — игнорируем
@@ -103,6 +123,104 @@ export default function AdminScanPage() {
       setErrorMsg('Не удалось запустить камеру')
       setScanning(false)
     }
+  }
+
+  // QR ящика (app/admin/boxes) кодирует box.code ("BOX-XXXXXX"), а не номер
+  // заказа. Скан №1 (эта страница) раньше распознавал только заказы — QR
+  // ящика молча уходил в "Заказ не найден", и массовое назначение курьера
+  // по зоне ящика было вообще некому делать. Теперь сначала проверяем,
+  // не ящик ли это, и только если нет — ищем заказ по номеру.
+  async function handleDecoded(raw: string) {
+    resetResult()
+    if (!raw) return
+
+    const { data: box, error: boxLookupErr } = await supabase
+      .from('delivery_boxes')
+      .select('id, code, label, zone_id, zones ( name )')
+      .eq('code', raw)
+      .maybeSingle()
+
+    if (boxLookupErr) {
+      console.error(boxLookupErr.message)
+      setToast({ message: 'Ошибка загрузки ящика: ' + boxLookupErr.message, type: 'error' })
+      return
+    }
+
+    if (box) {
+      await lookupBox(box as unknown as BoxRow & { zone_id: string | null; zones: { name: string } | null })
+      return
+    }
+
+    lookupOrder(raw)
+  }
+
+  async function lookupBox(box: BoxRow & { zone_id: string | null; zones: { name: string } | null }) {
+    const zoneName = box.zones?.name || null
+
+    if (!box.zone_id) {
+      setBoxNoCourier({ box, zoneName: null })
+      return
+    }
+
+    const { data: cz, error: czErr } = await supabase
+      .from('courier_zones')
+      .select('courier_id, couriers ( full_name )')
+      .eq('zone_id', box.zone_id)
+      .maybeSingle()
+
+    if (czErr) {
+      console.error(czErr.message)
+      setToast({ message: 'Ошибка загрузки курьера зоны: ' + czErr.message, type: 'error' })
+      return
+    }
+
+    const courierName = (cz as unknown as { couriers: { full_name: string } | null } | null)?.couriers?.full_name
+    if (!cz || !courierName) {
+      setBoxNoCourier({ box, zoneName })
+      return
+    }
+
+    const { data: ordersInBox, error: ordersErr } = await supabase
+      .from('orders')
+      .select('id, courier_name, status')
+      .eq('box_id', box.id)
+
+    if (ordersErr) {
+      console.error(ordersErr.message)
+      setToast({ message: 'Ошибка загрузки заказов ящика: ' + ordersErr.message, type: 'error' })
+      return
+    }
+
+    const rows = ordersInBox || []
+    const pending = rows.filter((o) => !o.courier_name && o.status !== 'delivered' && o.status !== 'cancelled')
+
+    setBoxResult({
+      box,
+      zoneName: zoneName || '—',
+      courierName,
+      pendingIds: pending.map((o) => o.id),
+      alreadyCount: rows.length - pending.length,
+    })
+  }
+
+  async function confirmBoxAssign() {
+    if (!boxResult || boxResult.pendingIds.length === 0 || assigningBox) return
+    setAssigningBox(true)
+    const { error } = await supabase
+      .from('orders')
+      .update({ courier_name: boxResult.courierName, status: 'in_transit', courier_stage: 'not_started' })
+      .in('id', boxResult.pendingIds)
+    setAssigningBox(false)
+
+    if (error) {
+      setToast({ message: 'Ошибка: ' + error.message, type: 'error' })
+      return
+    }
+
+    setSuccessMsg(
+      `Ящик «${boxResult.box.label}»: курьер ${boxResult.courierName} назначен на ${boxResult.pendingIds.length} заказ(ов)`,
+    )
+    setBoxResult(null)
   }
 
   async function lookupOrder(orderNumber: string) {
@@ -211,7 +329,7 @@ export default function AdminScanPage() {
               />
             </label>
             <button
-              onClick={() => lookupOrder(extractOrderNumber(manualNumber))}
+              onClick={() => handleDecoded(extractOrderNumber(manualNumber))}
               className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold hover:bg-gray-50 transition-all"
             >
               Найти
@@ -230,6 +348,49 @@ export default function AdminScanPage() {
           <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
             <CheckCircle2 className="h-4 w-4" />
             {successMsg}
+          </div>
+        )}
+
+        {boxNoCourier && (
+          <div className="flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>
+              Ящик «{boxNoCourier.box.label}» ({boxNoCourier.box.code}): к зоне
+              {boxNoCourier.zoneName ? ` «${boxNoCourier.zoneName}»` : ''} не привязан курьер.{' '}
+              <Link href="/admin/zones" className="underline underline-offset-2 font-semibold">
+                Привяжите курьера в разделе «Зоны»
+              </Link>
+              , затем отсканируйте ящик ещё раз.
+            </span>
+          </div>
+        )}
+
+        {boxResult && (
+          <div className="rounded-2xl border-4 border-purple-200 bg-purple-50 p-6 space-y-4 text-center">
+            <p className="text-sm font-semibold text-gray-500 flex items-center justify-center gap-1.5">
+              <Package className="h-4 w-4" />
+              Ящик «{boxResult.box.label}» ({boxResult.box.code}) — зона {boxResult.zoneName}
+            </p>
+            <p className="text-2xl font-black text-purple-700">Курьер: {boxResult.courierName}</p>
+            {boxResult.pendingIds.length > 0 ? (
+              <>
+                <p className="text-sm text-gray-500">
+                  Будет назначено на {boxResult.pendingIds.length} заказ(ов)
+                  {boxResult.alreadyCount > 0 && ` (ещё ${boxResult.alreadyCount} уже с курьером/завершены)`}
+                </p>
+                <button
+                  onClick={confirmBoxAssign}
+                  disabled={assigningBox}
+                  className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold disabled:opacity-50 transition-all"
+                >
+                  {assigningBox ? 'Назначаю…' : 'Назначить курьера на весь ящик'}
+                </button>
+              </>
+            ) : (
+              <p className="text-sm text-gray-500">
+                В ящике нет заказов, ожидающих назначения ({boxResult.alreadyCount} уже с курьером/завершены)
+              </p>
+            )}
           </div>
         )}
 
@@ -278,7 +439,15 @@ export default function AdminScanPage() {
         )}
       </main>
 
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          actionLabel={toast.actionLabel}
+          actionHref={toast.actionHref}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   )
 }
