@@ -134,10 +134,13 @@ export default function AdminScanPage() {
     resetResult()
     if (!raw) return
 
+    // Коды ящиков всегда генерируются в верхнем регистре (см. genCode в
+    // app/admin/boxes) — при сканировании камера всегда даёт verbatim-текст
+    // из QR, а вот при ручном вводе админ может напечатать строчными.
     const { data: box, error: boxLookupErr } = await supabase
       .from('delivery_boxes')
       .select('id, code, label, zone_id, zones ( name )')
-      .eq('code', raw)
+      .eq('code', raw.toUpperCase())
       .maybeSingle()
 
     if (boxLookupErr) {
@@ -386,10 +389,12 @@ export default function AdminScanPage() {
                   {assigningBox ? 'Назначаю…' : 'Назначить курьера на весь ящик'}
                 </button>
               </>
-            ) : (
+            ) : boxResult.alreadyCount > 0 ? (
               <p className="text-sm text-gray-500">
                 В ящике нет заказов, ожидающих назначения ({boxResult.alreadyCount} уже с курьером/завершены)
               </p>
+            ) : (
+              <p className="text-sm text-gray-500">В ящике пока нет заказов</p>
             )}
           </div>
         )}
