@@ -10,6 +10,7 @@ import { Toast } from '@/components/Toast'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, STAGE_MARKER_COLOR, type DisplayStage } from '@/lib/order-status'
 import { getSellerCourierIds } from '@/lib/couriers'
 import { dayStartMs, dayEndMs, applyDateRange } from '@/lib/date-range'
+import { formatOrderDates } from '@/lib/order-dates'
 import type { MapZone } from '@/components/MapGL'
 
 const MapGL = dynamic(() => import('@/components/MapGL'), { ssr: false })
@@ -43,6 +44,7 @@ interface Order {
   lat: number | null
   lng: number | null
   created_at: string
+  planned_delivery_date: string | null
   product_name: string | null
   product_quantity: number | null
 }
@@ -161,7 +163,7 @@ export default function MapPage() {
       }
       let query = supabase
         .from('orders')
-        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at, product_name, product_quantity')
+        .select('id, order_number, client_phone, client_address, status, courier_stage, price, courier_name, lat, lng, created_at, planned_delivery_date, product_name, product_quantity')
         .eq('seller_id', user.id)
         .order('created_at', { ascending: false })
       query = applyDateRange(query, dateFrom, dateTo)
@@ -547,7 +549,25 @@ export default function MapPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-500">{t('date')}</span>
-                  <span className="text-sm text-gray-500">{new Date(selectedOrder.created_at).toLocaleDateString('ru-RU')}</span>
+                  <span className="text-sm text-gray-500 text-right">
+                    {(() => {
+                      const { createdLabel, plannedLabel } = formatOrderDates(
+                        selectedOrder.created_at,
+                        selectedOrder.planned_delivery_date,
+                        'ru-RU',
+                      )
+                      return plannedLabel ? (
+                        <>
+                          {createdLabel}
+                          <span className="block">
+                            ({t('deliveryDateLabel')}: {plannedLabel})
+                          </span>
+                        </>
+                      ) : (
+                        createdLabel
+                      )
+                    })()}
+                  </span>
                 </div>
               </div>
 

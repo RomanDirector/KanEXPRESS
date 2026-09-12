@@ -13,6 +13,7 @@ import { useLang, localeTag } from '@/lib/i18n'
 import { waTemplates, openWhatsApp, defaultDeliveryWindow } from '@/lib/whatsapp-templates'
 import { getSellerCourierIds } from '@/lib/couriers'
 import { getDisplayStage, STAGE_LABEL, STAGE_BADGE_CLASS, type DisplayStage } from '@/lib/order-status'
+import { formatOrderDates } from '@/lib/order-dates'
 import { Toast } from '@/components/Toast'
 import { generatePDF } from '@/lib/invoice-pdf'
 import { dayStartMs, dayEndMs, todayInAlmaty } from '@/lib/date-range'
@@ -985,6 +986,7 @@ function ActiveOrdersTab({
             <tbody className="divide-y divide-gray-50">
               {filtered.map((order) => {
                 const stage = getDisplayStage(order)
+                const { createdLabel, plannedLabel } = formatOrderDates(order.created_at, order.planned_delivery_date, locale)
                 return (
                   <tr
                     key={order.id}
@@ -1021,7 +1023,14 @@ function ActiveOrdersTab({
                         />
                       ) : null}
                     </td>
-                    <td className="px-4 py-4 text-gray-400 text-xs">{new Date(order.created_at).toLocaleDateString(locale)}</td>
+                    <td className="px-4 py-4 text-gray-400 text-xs">
+                      {createdLabel}
+                      {plannedLabel && (
+                        <span className="block text-gray-400">
+                          ({t('deliveryDateLabel')}: {plannedLabel})
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-4">
                       <button
                         onClick={() => {
